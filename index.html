@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Delta-V · Arquitecto de Misiones</title>
+    <meta name="description" content="Diseña, lanza y simula una misión espacial completa con datos públicos de la NASA. NASA Space Apps Challenge 2026." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Big+Shoulders+Display:wght@500;700;800&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="stage" aria-hidden="true"></div>
+
+    <header class="brand">
+      <p class="brand__mark">Δv</p>
+      <div>
+        <h1 class="brand__name">Arquitecto de Misiones</h1>
+        <p class="brand__sub">NASA Space Apps 2026 · Space Mission Design Game</p>
+      </div>
+      <ul class="feeds" id="feeds" aria-label="Fuentes de datos NASA"></ul>
+    </header>
+
+    <nav class="phases" id="phases" aria-label="Fases de la misión"></nav>
+
+    <main class="sheet" id="sheet" tabindex="-1"></main>
+
+    <footer class="budgets" id="budgets" aria-label="Presupuestos de la misión"></footer>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
