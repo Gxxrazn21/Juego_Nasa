@@ -112,3 +112,13 @@ test('Una antena más grande o el láser bajan más ciencia desde Marte', () => 
   assert.ok(rate('hgaka') > rate('hgax') * 10, 'banda Ka de 3 m ≫ banda X de 1,5 m');
   assert.ok(rate('laser') > rate('hgax'), 'el láser supera a la banda X aun con nubes');
 });
+
+test('Una misión a un asteroide funciona antes de que lleguen los datos de NeoWs', () => {
+  // el teléfono abre el juego con la nave Vigía guardada y NeoWs aún no responde
+  const s = variant({ destination: 'neo', program: 'horizonte', neoId: '2099942' });
+  const ev = evaluate(s, { neos: [] });
+  assert.equal(ev.dest.neo.name, '99942 Apophis');
+  for (const c of ev.checks) assert.ok(!/NaN|undefined/.test(c.detail), c.detail);
+  // y con un asteroide guardado que ya no está en ninguna lista
+  assert.ok(Number.isFinite(evaluate({ ...s, neoId: 'desconocido' }, { neos: [] }).comms.rate));
+});

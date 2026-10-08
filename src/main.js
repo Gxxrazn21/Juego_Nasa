@@ -66,7 +66,7 @@ function loading(p) {
 }
 setTimeout(() => loading(1), 15000); // nunca bloquear el juego por una textura lenta
 
-let ev = evaluate(state, nasa);
+let ev = null; // se calcula en cada render(); así un diseño guardado raro no tumba el arranque
 let lastShipKey = '';
 let lastCrewKey = '';
 
@@ -120,7 +120,26 @@ let crewTimer;
 
 const focusFor = (s) => (s === 'insignia' ? 'capsule' : s);
 
-function render({ sheet = true, debounce = false } = {}) {
+/** Dibuja la interfaz; si algo falla, muestra cómo recuperarse en vez de dejar la pantalla vacía. */
+function render(opts) {
+  try {
+    draw(opts);
+  } catch (err) {
+    console.error(err);
+    showCrash(err);
+  }
+}
+
+function showCrash(err) {
+  $sheet.innerHTML = `<p class="eyebrow">Algo salió mal</p>
+  <h2>No se pudo mostrar tu misión</h2>
+  <p class="lede">Tu diseño guardado tiene algo que esta versión no entiende. Puedes reintentar o empezar con la nave por defecto (tus medallas se conservan).</p>
+  <p class="hint"></p>
+  <div class="actions"><button class="btn btn--go" data-reset>Empezar de nuevo</button><button class="btn" data-reload>Reintentar</button></div>`;
+  $sheet.querySelector('.hint').textContent = `Detalle técnico: ${err?.message ?? err}`;
+}
+
+function draw({ sheet = true, debounce = false } = {}) {
   ev = evaluate(state, nasa);
   $phases.innerHTML = ui.phasesNav(phase, ev, !!flightRun);
   $budgets.innerHTML = ui.budgets(ev);
@@ -355,6 +374,11 @@ $phases.addEventListener('click', (e) => {
 
 $sheet.addEventListener('click', (e) => {
   const t = e.target;
+  if (t.closest('[data-reset]')) {
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* modo privado */ }
+    return location.reload();
+  }
+  if (t.closest('[data-reload]')) return location.reload();
   const go = t.closest('[data-go]');
   if (go) {
     sfx.select();

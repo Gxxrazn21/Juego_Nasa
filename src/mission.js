@@ -1,6 +1,6 @@
 // Modelo de la misión tripulada: masa, ruta con estaciones y provisiones,
 // validaciones contra física y datos NASA. El vuelo en sí vive en flight.js.
-import { PROGRAMS, DESTINATIONS, LAUNCHERS, STATIONS, INSTRUMENTS } from './data/catalog.js';
+import { PROGRAMS, DESTINATIONS, LAUNCHERS, STATIONS, INSTRUMENTS, FALLBACK_NEOS } from './data/catalog.js';
 import { PARTS, PROPELLANTS, PAINTS, ACCENTS } from './data/parts.js';
 import { ROLES, DEFAULT_NAMES } from './data/crew.js';
 import { neoRendezvous, G0, AU_KM, downlinkBps, meanEarthDistanceAU } from './physics.js';
@@ -49,12 +49,13 @@ export function defaultState() {
 export function resolveDestination(state, neos = []) {
   const base = byId(DESTINATIONS, state.destination) ?? DESTINATIONS[0];
   if (!base.computed) return base;
-  const neo = neos.find((n) => n.id === state.neoId) || neos[0];
-  const t = neo ? neoRendezvous(neo) : { departureFromLeo: 4.5, arrivalDv: 2, transferDays: 220, vinf: 3, aphelionAU: 1.4 };
+  // mientras NeoWs carga (o si falla) se usa el catálogo de respaldo: así siempre hay una órbita real
+  const neo = neos.find((n) => n.id === state.neoId) || FALLBACK_NEOS.find((n) => n.id === state.neoId) || neos[0] || FALLBACK_NEOS[0];
+  const t = neoRendezvous(neo);
   return {
     ...base,
     neo,
-    name: neo ? neo.name : base.name,
+    name: neo.name,
     sunAU: t.aphelionAU,
     reentry: Math.sqrt(11.1 ** 2 + t.vinf ** 2),
     orbit: neo,

@@ -100,6 +100,7 @@ export function downlinkBps(c, distKm, ground = 1) {
 
 /** Distancia media Tierra–órbita objetivo (UA), promediando todas las posiciones relativas. */
 export function meanEarthDistanceAU(orbit, n = 48) {
+  if (!orbit) return 1;
   let sum = 0;
   for (let i = 0; i < n; i++) {
     const p = orbitPoint(orbit, (i / n) * Math.PI * 2);
