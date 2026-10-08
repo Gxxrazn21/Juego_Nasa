@@ -19,7 +19,7 @@ const EARTH_R = 3000; // Tierra del telón de fondo (escala de escena, no real)
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const SUN_DIR = new THREE.Vector3(0.8, 0.45, 0.5).normalize();
 
-export function createStage(container, { quality = 'media', onProgress } = {}) {
+export function createStage(container, { quality = 'media', onProgress, onContextLost } = {}) {
   let q = QUALITY[quality];
   // Progreso de carga de texturas y modelos (pantalla de carga)
   THREE.DefaultLoadingManager.onProgress = (_url, loaded, total) => onProgress?.(loaded / total);
@@ -33,6 +33,11 @@ export function createStage(container, { quality = 'media', onProgress } = {}) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   container.appendChild(renderer.domElement);
+  // Si el sistema le quita la GPU al navegador (memoria baja), lo avisamos en vez de quedar en negro
+  renderer.domElement.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    onContextLost?.();
+  });
 
   const labels = new CSS2DRenderer();
   labels.domElement.className = 'labels';
@@ -92,18 +97,87 @@ export function createStage(container, { quality = 'media', onProgress } = {}) {
   preload(['emu', 'iss-lite']);
 
   // ---------- Hangar ----------
+  // La nave cuelga de un pivote: las naves largas se muestran en diagonal («foto de héroe»)
+  // para llenar mejor la pantalla, y giran sobre su propio eje.
+  const pivot = new THREE.Group();
+  hangar.add(pivot);
   function setShip(ev, look) {
-    if (ship) { hangar.remove(ship); dispose(ship); }
+    if (ship) { pivot.remove(ship); dispose(ship); }
     shipInfo = buildShip(ev, look);
     ship = shipInfo.group;
-    hangar.add(ship);
+    const { top, low, width } = shipInfo;
+    const ratio = (top - low) / (2 * Math.max(width, 1));
+    const tilt = THREE.MathUtils.clamp((ratio - 1.2) * 0.35, 0, 0.75);
+    ship.position.y = -(top + low) / 2;
+    pivot.position.y = (top + low) / 2;
+    pivot.rotation.set(0, 0, -tilt);
+    pivot.add(ship);
   }
 
+  /** Ejecuta fn con la nave en su sistema propio (sin pivote ni giro), para medir piezas. */
+  function inShipFrame(fn) {
+    const saved = [pivot.position.y, pivot.rotation.z, ship.position.y, ship.rotation.y];
+    pivot.position.y = 0; pivot.rotation.z = 0; ship.position.y = 0; ship.rotation.y = 0;
+    pivot.updateMatrixWorld(true);
+    const out = fn();
+    [pivot.position.y, pivot.rotation.z, ship.position.y, ship.rotation.y] = saved;
+    pivot.updateMatrixWorld(true);
+    return out;
+  }
+
+  /**
+   * Encuadra la nave. Con una ranura concreta se acerca a esa pieza, pero sin perder
+   * nunca la nave de vista (importante en teléfonos y en naves grandes), y la resalta.
+   */
   function focusSlot(slot, animate = true) {
     if (!shipInfo) return;
-    const f = shipInfo.focus[slot] ?? shipInfo.focus.all;
-    const dir = new THREE.Vector3(0.75, 0.32, 1).normalize();
-    goTo(new THREE.Vector3(0, f.y, 0).addScaledVector(dir, f.r * 1.9), new THREE.Vector3(0, f.y, 0), animate);
+    // caja de la nave en el mundo (con la inclinación del pivote, sin el giro propio)
+    const spin = ship.rotation.y;
+    ship.rotation.y = 0;
+    pivot.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    ship.children.forEach((c) => { if (c.name !== 'plume' && c !== marker) box.expandByObject(c); });
+    ship.rotation.y = spin;
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const halfH = size.y / 2, halfW = Math.max(size.x, size.z) / 2;
+    const tanV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const fit = Math.max(halfH / tanV, halfW / (tanV * visibleAspect)) * 1.15 + halfW * 0.3;
+    const f = shipInfo.focus[slot];
+    let dist = fit;
+    const look = center.clone();
+    if (f && slot !== 'all' && slot !== 'paint') {
+      // En pantallas bajas (teléfonos) la nave se ve entera y el marco naranja señala la pieza;
+      // en PC la cámara se acerca a la pieza como en un taller.
+      const compact = container.clientHeight < 520;
+      const near = Math.max(f.r * 1.9, 6);
+      dist = compact ? fit : Math.min(fit, Math.max(near, fit * 0.55));
+      look.lerp(ship.localToWorld(new THREE.Vector3(0, f.y, 0)), compact ? 0.3 : 0.7);
+    }
+    const dir = new THREE.Vector3(0.75, 0.3, 1).normalize();
+    goTo(look.clone().addScaledVector(dir, dist), look, animate);
+    controls.maxDistance = Math.max(700, fit * 2.5);
+    highlight(slot);
+  }
+
+  // Marco que parpadea alrededor de la pieza seleccionada, como en un taller
+  let marker = null;
+  function highlight(slot) {
+    if (marker) { marker.parent?.remove(marker); dispose(marker); marker = null; }
+    if (!ship || !slot || ['all', 'paint', 'insignia', 'presets'].includes(slot)) return;
+    // la caja se mide en el sistema propio de la nave y se cuelga de ella para girar con ella
+    const box = inShipFrame(() => {
+      const b = new THREE.Box3();
+      ship.children.forEach((c) => { if (c.userData.slot === slot) b.expandByObject(c); });
+      return b;
+    });
+    if (box.isEmpty()) return;
+    box.expandByScalar(0.25);
+    marker = new THREE.Box3Helper(box, new THREE.Color(0xff8a3d));
+    marker.material.transparent = true;
+    marker.material.depthTest = false;
+    marker.userData.born = performance.now();
+    ship.add(marker);
   }
 
   // ---------- Tripulación ----------
@@ -263,9 +337,9 @@ export function createStage(container, { quality = 'media', onProgress } = {}) {
     const ghost = new THREE.Line(geo.clone(), new THREE.LineDashedMaterial({ color: 0xffd28a, dashSize: 0.3, gapSize: 0.3, transparent: true, opacity: 0.35 }));
     ghost.computeLineDistances();
     const trail = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffd28a }));
-    const marker = new THREE.Mesh(new THREE.OctahedronGeometry(0.18), new THREE.MeshBasicMaterial({ color: 0xffe6b8 }));
-    marker.add(glowSprite(0xffc078, 1.4));
-    map.add(ghost, trail, marker);
+    const craftDot = new THREE.Mesh(new THREE.OctahedronGeometry(0.18), new THREE.MeshBasicMaterial({ color: 0xffe6b8 }));
+    craftDot.add(glowSprite(0xffc078, 1.4));
+    map.add(ghost, trail, craftDot);
     return {
       update(dt) {
         this.t += (this.target - this.t) * Math.min(1, dt * 1.6);
@@ -273,8 +347,8 @@ export function createStage(container, { quality = 'media', onProgress } = {}) {
         const f = this.t * n;
         const i = Math.min(n - 1, Math.floor(f));
         trail.geometry.setDrawRange(0, i + 2);
-        marker.position.copy(points[i]).lerp(points[i + 1], f - i);
-        marker.rotation.y += dt * 2;
+        craftDot.position.copy(points[i]).lerp(points[i + 1], f - i);
+        craftDot.rotation.y += dt * 2;
       },
     };
   }
@@ -376,6 +450,7 @@ export function createStage(container, { quality = 'media', onProgress } = {}) {
     obj.add(l);
   }
 
+  let visibleAspect = 1;
   function resize() {
     const w = container.clientWidth, h = container.clientHeight;
     if (!w || !h) return;
@@ -387,8 +462,12 @@ export function createStage(container, { quality = 'media', onProgress } = {}) {
     const box = container.getBoundingClientRect();
     const covered = sheet && sheet.top < box.top + h * 0.5 && sheet.bottom > box.top + h * 0.5
       ? Math.max(0, Math.min(w * 0.6, box.right - sheet.left + 16)) : 0;
-    if (covered > 40) camera.setViewOffset(w + covered, h, covered, 0, w, h);
-    else camera.clearViewOffset();
+    // El aspecto debe ser el del encuadre completo (w + tapado); si no, la imagen se estira
+    if (covered > 40) {
+      camera.aspect = (w + covered) / h;
+      camera.setViewOffset(w + covered, h, covered, 0, w, h);
+    } else camera.clearViewOffset();
+    visibleAspect = w / h;
     camera.updateProjectionMatrix();
   }
   new ResizeObserver(resize).observe(container);
@@ -430,6 +509,11 @@ export function createStage(container, { quality = 'media', onProgress } = {}) {
     const dt = Math.min(Math.max(timer.getDelta(), 0), 0.05);
     const t = timer.getElapsed();
     // Luces de navegación parpadeando y llama del motor
+    if (marker) {
+      const age = (performance.now() - marker.userData.born) / 1000;
+      marker.material.opacity = age > 2.4 ? 0 : 0.35 + 0.45 * Math.abs(Math.sin(age * 4));
+      marker.visible = age <= 2.4;
+    }
     if (ship) {
       ship.traverse((o) => {
         if (o.userData.blink) o.visible = (t + o.userData.blink) % 1.4 < 0.12;
@@ -461,7 +545,7 @@ export function createStage(container, { quality = 'media', onProgress } = {}) {
     labels.render(scene, camera);
   });
 
-  return { setShip, focusSlot, setCrew, setMode, showMap, setProgress, showDock, setQuality, ignite, resize, scene, camera, get mode() { return mode; } };
+  return { setShip, focusSlot, setCrew, setMode, showMap, setProgress, showDock, setQuality, ignite, resize, scene, camera, renderer, get mode() { return mode; } };
 }
 
 // ---------- utilidades ----------
@@ -546,9 +630,20 @@ function clearGroup(g) {
   g.clear();
   g.userData = {};
 }
+/**
+ * Libera la memoria de la GPU de un objeto: geometrías, materiales y texturas propias.
+ * Las texturas compartidas o en caché llevan userData.keep y se conservan.
+ * (Sin esto, cada cambio en el hangar dejaba texturas huérfanas y en teléfonos
+ * la vista 3D terminaba perdiendo el contexto WebGL.)
+ */
 function dispose(obj) {
   obj.traverse((o) => {
     if (o.isCSS2DObject) o.element.remove();
     if (o.geometry && !o.userData.shared) o.geometry.dispose();
+    for (const m of o.material ? [].concat(o.material) : []) {
+      for (const v of Object.values(m)) if (v?.isTexture && !v.userData.keep) v.dispose();
+      if (m.uniforms) for (const u of Object.values(m.uniforms)) if (u.value?.isTexture && !u.value.userData.keep) u.value.dispose();
+      m.dispose();
+    }
   });
 }

@@ -15,12 +15,18 @@ export function mission(state, ev, nasa) {
   <h2>Elige la misión</h2>
   <p class="lede">Una misión tripulada: tu personaje y su equipo deben ir y volver. Cada destino cambia el Δv, los días de víveres, la radiación y el escudo térmico necesario.</p>
 
+  <aside class="callout">
+    <p><strong>¿Primera vez?</strong> Empieza con una nave de fábrica ya probada: Artemis, Dragon, un alunizador nuclear o el tránsito a Marte.</p>
+    <button type="button" class="btn btn--small" data-go="hangar" data-open="presets">Ver naves →</button>
+  </aside>
+
   <h3>Destino</h3>
   <div class="options">
     ${DESTINATIONS.map((d) => radio('destination', d.id, state.destination === d.id, d.name, d.blurb, d.short)).join('')}
   </div>
   ${ev.dest.canLand ? `<label class="toggle"><input type="checkbox" name="land" ${state.land ? 'checked' : ''} /> <span><strong>Alunizar</strong> · descenso y ascenso de ~1,9–2,5 km/s, más ciencia y +45 puntos de exploración</span></label>` : ''}
   ${state.destination === 'neo' ? neoPicker(state, nasa) : ''}
+
 
   <h3>Programa <small>techo de costo total</small></h3>
   <div class="options">

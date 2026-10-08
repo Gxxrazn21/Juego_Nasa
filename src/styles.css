@@ -779,3 +779,41 @@ body.is-expanded .hud-actions, body.is-expanded .settings { right: var(--space-m
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* ---------- Naves de fábrica ---------- */
+.presets { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-md); }
+.preset {
+  display: grid;
+  grid-template-columns: minmax(0, 9.5rem) 1fr;
+  gap: var(--space-md);
+  padding: var(--space-sm);
+  border: 1.5px solid var(--paper-line);
+  border-radius: 6px;
+  background: oklch(0.975 0.008 85);
+  transition: border-color 0.2s, transform 0.2s var(--ease-out);
+}
+@media (hover: hover) { .preset:hover { border-color: var(--ink-3); transform: translateY(-2px); } }
+.preset[data-active] { border-color: var(--accent); background: oklch(0.95 0.03 55); }
+.preset__img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--void);
+}
+.preset__body { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.preset__family { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: var(--text-xs); letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-ink); }
+.preset__name { margin: 0; font-family: var(--font-display); font-weight: 800; font-size: var(--text-lg); line-height: 1.1; text-transform: uppercase; }
+.preset__tag { margin: 2px 0 0; font-size: var(--text-sm); }
+.preset__meta { margin: 2px 0 0; font-size: var(--text-xs); color: var(--ink-2); }
+.preset__meta strong { color: var(--ok); }
+.preset__lesson { margin: 2px 0 var(--space-xs); font-size: var(--text-xs); color: var(--ink-3); font-style: italic; }
+.undo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-xs); margin: 0 0 var(--space-md); padding: var(--space-xs) var(--space-sm); background: var(--paper-2); border-radius: 4px; font-size: var(--text-sm); }
+.callout { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-sm); margin: 0 0 var(--space-md); padding: var(--space-md); background: var(--ink); color: var(--paper); border-radius: 6px; }
+.callout p { margin: 0; font-size: var(--text-sm); max-width: 44ch; }
+.callout .btn { border-color: var(--paper); color: var(--paper); }
+.callout .btn:hover { background: oklch(0.3 0.02 var(--hue)); }
+@media (max-width: 420px) {
+  .preset { grid-template-columns: 1fr; }
+}

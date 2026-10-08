@@ -10,6 +10,7 @@ function tex(path, srgb = true) {
     const t = loader.load(path);
     if (srgb) t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 8;
+    t.userData.keep = true; // en caché: se reutiliza en cada escena
     cache.set(path, t);
   }
   return cache.get(path);
@@ -170,6 +171,7 @@ export function glowSprite(color, size) {
     ctx.fillStyle = grd;
     ctx.fillRect(0, 0, 128, 128);
     glowTex = new THREE.CanvasTexture(c);
+    glowTex.userData.keep = true;
   }
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
   s.scale.setScalar(size);

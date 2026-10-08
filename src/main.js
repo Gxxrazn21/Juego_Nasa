@@ -1,9 +1,11 @@
 import './styles.css';
 import { createStage } from './scene/stage.js';
-import { defaultState, evaluate, simulate, newCrewMember, paintHex, accentHex, fmt } from './mission.js';
+import { defaultState, evaluate, simulate, newCrewMember, paintHex, accentHex, fmt, minimalPropellant, presetState } from './mission.js';
 import { loadSpaceWeather, loadNeos, loadApod, solarActivity } from './nasa.js';
 import { SUITS, ROLES, SUIT_COLORS } from './data/crew.js';
 import { PARTS } from './data/parts.js';
+import { PRESETS } from './data/presets.js';
+import { FALLBACK_NEOS } from './data/catalog.js';
 import { QUALITY, resolveQuality, detectQuality, hasWebGL } from './app/quality.js';
 import { sfx, setSound } from './app/audio.js';
 import { fileToLogo, preloadLogo } from './app/insignia.js';
@@ -17,7 +19,8 @@ const state = restore() ?? defaultState();
 const prefs = { quality: 'auto', sound: true, ...readJSON(PREFS_KEY) };
 const nasa = { flares: [], cmes: [], neos: [], activity: null, weatherLive: null, neosLive: null, apod: null };
 let phase = 'mission';
-let slot = 'capsule';
+let slot = 'presets';
+let presetBackup = null; // diseño anterior, para «Volver a mi diseño»
 let flightRun = null; // { result, revealed, done }
 
 const $sheet = document.getElementById('sheet');
@@ -30,15 +33,25 @@ setSound(prefs.sound);
 
 // ---------- escena 3D (con alternativa si no hay WebGL) ----------
 const stage = hasWebGL()
-  ? createStage(document.getElementById('stage'), { quality: resolveQuality(prefs.quality), onProgress: loading })
+  ? createStage(document.getElementById('stage'), { quality: resolveQuality(prefs.quality), onProgress: loading, onContextLost: contextLost })
   : noStage();
-if (import.meta.env.DEV) window.__deltav = { stage, state };
+if (import.meta.env.DEV) window.__deltav = { stage, state, applyPreset };
 
 function noStage() {
   document.getElementById('stage').innerHTML = '<p class="no-webgl">Tu navegador no tiene WebGL: el juego funciona, pero sin la vista 3D.</p>';
   loading(1);
   const noop = () => {};
   return { setShip: noop, focusSlot: noop, setCrew: noop, setMode: noop, showMap: noop, setProgress: noop, showDock: noop, setQuality: noop, ignite: noop, resize: noop, mode: 'none' };
+}
+
+function contextLost() {
+  // El teléfono se quedó sin memoria gráfica: tu diseño está guardado, basta con recargar
+  const box = document.createElement('div');
+  box.className = 'no-webgl';
+  box.innerHTML = '<p>La vista 3D se detuvo para liberar memoria del teléfono.<br>Tu nave está guardada.</p><button type="button" class="btn btn--go">Recargar vista 3D</button>';
+  box.querySelector('button').addEventListener('click', () => location.reload());
+  document.getElementById('stage').append(box);
+  if (prefs.quality !== 'baja') { prefs.quality = 'baja'; savePrefs(); }
 }
 
 function loading(p) {
@@ -112,7 +125,10 @@ function render({ sheet = true, debounce = false } = {}) {
   switch (phase) {
     case 'mission': $sheet.innerHTML = ui.mission(state, ev, nasa); break;
     case 'crew': $sheet.innerHTML = ui.crew(state, ev); break;
-    case 'hangar': $sheet.innerHTML = ui.hangar(state, ev, slot, slot === 'insignia' ? ui.insigniaPreview(shipLook().insignia) : null); break;
+    case 'hangar': $sheet.innerHTML = ui.hangar(state, ev, slot, slot === 'insignia' ? ui.insigniaPreview(shipLook().insignia) : null, {
+      summaries: slot === 'presets' ? presetSummaries() : null,
+      canUndo: !!presetBackup,
+    }); break;
     case 'route': $sheet.innerHTML = ui.route(state, ev); break;
     case 'review': $sheet.innerHTML = ui.review(state, ev); break;
     case 'flight': $sheet.innerHTML = ui.flight(state, ev, flightRun.result, flightRun.revealed, flightRun.done); break;
@@ -218,20 +234,48 @@ async function launchMission() {
   $sheet.scrollTop = $sheet.scrollHeight;
 }
 
-// ---------- propelente justo ----------
-function autoPropellant() {
-  const cap = ev.tankCapacity;
-  const works = (load) => {
-    const e = evaluate({ ...state, propLoad: load }, nasa);
-    return e.route.failure?.reason !== 'prop' && e.route.finalProp >= cap * 0.05;
-  };
-  if (!works(cap)) { state.propLoad = cap; return; }
-  let lo = 0, hi = cap;
-  for (let i = 0; i < 22; i++) {
-    const mid = (lo + hi) / 2;
-    if (works(mid)) hi = mid; else lo = mid;
+// ---------- naves de fábrica ----------
+let summaryCache = { key: '', data: null };
+function presetSummaries() {
+  const key = JSON.stringify([nasa.weatherLive, nasa.neosLive, nasa.neos.length, nasa.activity?.index]);
+  if (summaryCache.key !== key) {
+    const data = {};
+    for (const p of PRESETS) {
+      ensurePresetNeo(p);
+      const e = evaluate(presetState(state, p, nasa), nasa);
+      data[p.id] = { dest: e.dest.short, engine: e.ship.engine.name, crew: e.crewN, days: e.routeDays, cost: e.cost, fails: e.checks.filter((c) => c.status === 'fail').length };
+    }
+    summaryCache = { key, data };
   }
-  state.propLoad = Math.ceil(hi / 10) * 10;
+  return summaryCache.data;
+}
+
+/** Vigía va a Apophis: si NeoWs en vivo no lo trae, se agrega desde el respaldo. */
+function ensurePresetNeo(p) {
+  const id = p.mission.neoId;
+  if (id && !nasa.neos.some((n) => n.id === id)) {
+    const neo = FALLBACK_NEOS.find((n) => n.id === id);
+    if (neo) nasa.neos = [...nasa.neos, neo];
+  }
+}
+
+function applyPreset(id) {
+  const p = PRESETS.find((x) => x.id === id);
+  if (!p) return;
+  ensurePresetNeo(p);
+  presetBackup = structuredClone(state);
+  Object.assign(state, presetState(state, p, nasa));
+  sfx.select();
+  render();
+  stage.focusSlot('all');
+}
+
+function undoPreset() {
+  if (!presetBackup) return;
+  Object.assign(state, presetBackup);
+  presetBackup = null;
+  render();
+  stage.focusSlot('all');
 }
 
 // ---------- eventos ----------
@@ -243,7 +287,14 @@ $phases.addEventListener('click', (e) => {
 $sheet.addEventListener('click', (e) => {
   const t = e.target;
   const go = t.closest('[data-go]');
-  if (go) { sfx.select(); return goPhase(go.dataset.go); }
+  if (go) {
+    sfx.select();
+    if (go.dataset.open) slot = go.dataset.open;
+    return goPhase(go.dataset.go);
+  }
+  const preset = t.closest('[data-preset]');
+  if (preset) return applyPreset(preset.dataset.preset);
+  if (t.closest('[data-undo-preset]')) return undoPreset();
   if (t.closest('[data-launch]')) return launchMission();
   const tab = t.closest('[data-slot]');
   if (tab) {
@@ -272,7 +323,7 @@ $sheet.addEventListener('click', (e) => {
     return render();
   }
   if (t.closest('[data-autoprop]')) {
-    autoPropellant();
+    state.propLoad = minimalPropellant(state, nasa);
     return render();
   }
   if (t.closest('[data-clear-logo]')) {
@@ -292,6 +343,7 @@ $sheet.addEventListener('input', (e) => {
     render({ sheet: false });
   } else if (type === 'text' || type === 'color') {
     applyPath(name, value);
+    if (/^ship\./.test(name)) state.presetId = null;
     if (type === 'color') {
       const dot = e.target.nextElementSibling;
       if (dot) { dot.style.background = value; dot.dataset.on = ''; }
@@ -329,6 +381,7 @@ $sheet.addEventListener('change', async (e) => {
     applyPath(name, value);
   }
   sfx.click();
+  if (/^(ship|insignia)\./.test(name) || name === 'instrument') state.presetId = null;
   // reglas de consistencia
   if (name === 'ship.capsule') state.crew = state.crew.slice(0, PARTS.capsule.find((c) => c.id === value).seats);
   if (name === 'insignia.symbol') state.look.insignia.upload = null;

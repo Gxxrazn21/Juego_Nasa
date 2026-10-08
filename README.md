@@ -24,6 +24,9 @@ provisiones y vuelas la misión. Cada decisión se valida con física y **datos 
 Las estaciones solo venden ciertos propelentes: si eliges un Raptor (metano) no puedes repostar en Gateway.
 Ejemplo real del juego: la Orion por defecto **no puede volver de la Luna sin repostar en Gateway**.
 
+### Naves de fábrica
+En el hangar, la pestaña **Naves** trae 6 diseños completos que ya vuelan (probados en los tests, incluso con el Sol en actividad extrema): **Integridad** (Artemis: Orion + SLS + Gateway), **Resiliencia** (Dragon a la ISS), **Tranquilidad** (retro Apolo con motor RL10 y repostaje en órbita), **Prometeo** (alunizador de una sola etapa con motor nuclear), **Ares IV** (tránsito a Marte con hábitat inflable) y **Vigía** (visita al asteroide Apophis). Se cargan con un toque y se pueden modificar; «Volver a mi diseño» deshace el cambio.
+
 ### Personalización
 - **Pintura**: casco y acento (paleta o color libre), librea (liso, bandas, ajedrez del Saturno V, bicolor, franjas), acabado (satinado, mate, metalizado) y aislamiento MLI (dorado, plata, negro).
 - **Nombre de la nave** pintado en los tanques y el hábitat.

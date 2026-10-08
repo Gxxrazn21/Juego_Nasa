@@ -31,6 +31,7 @@ function solarCellTexture() {
   return t;
 }
 const cellTex = solarCellTexture();
+cellTex.userData.keep = true; // compartida: no se libera al reconstruir la nave
 
 export const FINISHES = { satinado: [0.45, 0.15], mate: [0.85, 0], metalico: [0.28, 0.75] };
 export const MLI_COLORS = { oro: [0xd9a441, 0.35, 0.85], plata: [0xc9ccd2, 0.3, 0.9], negro: [0x1d1d22, 0.55, 0.3] };
@@ -146,6 +147,12 @@ export function buildShip(ev, look = {}) {
 
   const R = ship.capsule.radius;
   let y = 0;
+  // Etiqueta las piezas añadidas desde la última marca con su ranura del hangar
+  let marked = 0;
+  const mark = (slot) => {
+    for (let i = marked; i < g.children.length; i++) g.children[i].userData.slot = slot;
+    marked = g.children.length;
+  };
 
   // ---------- Motor (cuelga bajo y = 0) ----------
   const engine = new THREE.Group();
@@ -211,6 +218,7 @@ export function buildShip(ev, look = {}) {
     engineBottom = -0.6 - trussL - 2.2 - 2.6;
   }
   g.add(engine);
+  mark('engine');
   focus.engine = { y: engineBottom / 2, r: Math.max(6, -engineBottom * 1.2) };
 
   // ---------- Tanques ----------
@@ -241,6 +249,8 @@ export function buildShip(ev, look = {}) {
     y += 0.8;
   }
 
+  mark('tanks');
+
   // ---------- Módulo de servicio + energía ----------
   const smH = Math.max(1.2, R * 0.9);
   const sm = new THREE.Mesh(new THREE.CylinderGeometry(R, R, smH, 48), mli);
@@ -254,7 +264,9 @@ export function buildShip(ev, look = {}) {
     quad.position.set(Math.cos(a) * (R + 0.12), smY + smH * 0.3, Math.sin(a) * (R + 0.12));
     g.add(quad);
   }
+  mark('life');
   addPower(g, ship.power, R, smY, dark, metal);
+  mark('power');
   focus.power = { y: smY, r: Math.max(8, R * 5) };
   focus.life = { y: smY, r: R * 3.2 };
   y += smH;
@@ -278,6 +290,8 @@ export function buildShip(ev, look = {}) {
     focus.legs = { y: tankBottom, r: rt * 3.5 };
   }
 
+  mark('legs');
+
   // ---------- Escudo térmico ----------
   const shieldColors = { none: 0x555555, ablative: 0x5a4632, avcoat: 0x3d2f26, pica: 0x15151a };
   const shield = new THREE.Mesh(
@@ -288,6 +302,8 @@ export function buildShip(ev, look = {}) {
   if (ship.shield.id !== 'none') g.add(shield);
   focus.shield = { y: y, r: R * 3 };
   y += ship.shield.id !== 'none' ? 0.35 : 0.05;
+
+  mark('shield');
 
   // ---------- Cápsula ----------
   const capsuleBase = y;
@@ -344,6 +360,8 @@ export function buildShip(ev, look = {}) {
   focus.paint = { y: y, r: Math.max(10, R * 4) };
   y += capH;
 
+  mark('capsule');
+
   // ---------- Hábitat ----------
   const h = ship.habitat.id;
   if (h !== 'none') {
@@ -390,6 +408,8 @@ export function buildShip(ev, look = {}) {
     focus.habitat = { y: y, r: 8 };
   }
 
+  mark('habitat');
+
   // ---------- Acoplamiento ----------
   if (ship.docking.id !== 'none') {
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.9, 0.5, 32), metal);
@@ -420,6 +440,8 @@ export function buildShip(ev, look = {}) {
     focus.docking = { y: y, r: 6 };
   }
 
+  mark('docking');
+
   // ---------- Ciencia: cajas de experimentos en el módulo de servicio ----------
   ev.instruments.forEach((ins, i) => {
     const a = (i / Math.max(1, ev.instruments.length)) * Math.PI * 2 + 0.3;
@@ -429,6 +451,8 @@ export function buildShip(ev, look = {}) {
     g.add(box);
   });
   focus.science = { y: smY, r: R * 3.5 };
+
+  mark('science');
 
   // ---------- Luces de navegación: roja a babor, verde a estribor, estroboscópicas blancas ----------
   const lights = [
@@ -462,7 +486,11 @@ export function buildShip(ev, look = {}) {
   g.traverse((o) => { if (o.isMesh && o.material.blending !== THREE.AdditiveBlending) { o.castShadow = true; o.receiveShadow = true; } });
   const bottom = Math.min(engineBottom, ship.legs.id !== 'none' ? Math.min(engineBottom, tankBottom) - 0.6 : engineBottom);
   focus.all = { y: (y + bottom) / 2, r: Math.max(10, (y - bottom) * 1.1) };
-  return { group: g, focus, height: y, bottom };
+  // Tamaño real (incluye paneles y mástiles) para encuadrar la nave completa
+  const box = new THREE.Box3();
+  g.children.forEach((c) => { if (c.name !== 'plume') box.expandByObject(c); });
+  const width = Math.max(Math.abs(box.min.x), Math.abs(box.max.x), Math.abs(box.min.z), Math.abs(box.max.z));
+  return { group: g, focus, height: y, bottom, top: box.max.y, low: box.min.y, width };
 }
 
 /** Radio de un perfil de torno a la altura h. */

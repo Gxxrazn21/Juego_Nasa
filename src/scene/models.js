@@ -18,6 +18,9 @@ function load(name) {
           for (const m of [].concat(o.material)) if (m.transmission) m.transmission = 0;
           o.castShadow = o.receiveShadow = true;
           o.userData.shared = true; // la geometría vive en la caché: no se libera
+          for (const m of [].concat(o.material)) {
+            for (const v of Object.values(m)) if (v?.isTexture) v.userData.keep = true;
+          }
         }
       });
       return g.scene;

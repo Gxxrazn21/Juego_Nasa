@@ -81,3 +81,20 @@ test('Los colores admiten la paleta o un hex personalizado', () => {
   assert.equal(paintHex('white'), '#e9e6df');
   assert.equal(accentHex('nada'), '#f26a2e');
 });
+
+test('Todas las naves de fábrica completan su misión sin fallas', async () => {
+  const { PRESETS } = await import('../src/data/presets.js');
+  const { presetState } = await import('../src/mission.js');
+  const { solarActivity } = await import('../src/nasa.js');
+  // con el Sol en actividad extrema (respaldo de mayo de 2024)
+  const hard = { neos: FALLBACK_NEOS, activity: solarActivity(FALLBACK_FLARES) };
+  for (const p of PRESETS) {
+    const s = presetState(defaultState(), p, hard);
+    const ev = evaluate(s, hard);
+    const fails = ev.checks.filter((c) => c.status === 'fail').map((c) => `${c.label}: ${c.detail}`);
+    assert.deepEqual(fails, [], p.id);
+    const r = simulate(s, ev, FALLBACK_FLARES);
+    assert.equal(r.lostCrew, false, p.id);
+    assert.ok(r.reached, `${p.id} llega a su destino`);
+  }
+});

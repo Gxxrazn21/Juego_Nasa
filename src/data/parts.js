@@ -4,12 +4,13 @@
 export const PROPELLANTS = {
   hipergolico: { name: 'Hipergólico (MMH/NTO)', density: 1200, tankFrac: 0.06, boiloff: 0 },
   metalox: { name: 'Metalox (CH₄/LOX)', density: 830, tankFrac: 0.07, boiloff: 0.0001 },
-  hidrolox: { name: 'Hidrolox (LH₂/LOX)', density: 360, tankFrac: 0.12, boiloff: 0.0005 },
-  lh2: { name: 'Hidrógeno líquido', density: 71, tankFrac: 0.16, boiloff: 0.0007 },
+  hidrolox: { name: 'Hidrolox (LH₂/LOX)', density: 360, tankFrac: 0.12, boiloff: 0.0003 },
+  lh2: { name: 'Hidrógeno líquido', density: 71, tankFrac: 0.16, boiloff: 0.0003 }, // con aislamiento multicapa y crioenfriadores
   xenon: { name: 'Xenón', density: 1600, tankFrac: 0.1, boiloff: 0 },
 };
 
 export const SLOTS = [
+  { id: 'presets', name: 'Naves' },
   { id: 'capsule', name: 'Cápsula' },
   { id: 'habitat', name: 'Hábitat' },
   { id: 'engine', name: 'Motor' },
@@ -41,13 +42,15 @@ export const PARTS = {
     { id: 'rl10', name: 'RL10B-2', ref: 'Etapas superiores Delta IV y SLS', prop: 'hidrolox', isp: 465, thrust: 110, mass: 300, cost: 25, power: 0, reliability: 0.995, timeFactor: 1 },
     { id: 'rvac', name: 'Raptor Vacuum', ref: 'Etapa superior de Starship', prop: 'metalox', isp: 380, thrust: 2500, mass: 1600, cost: 8, power: 0, reliability: 0.98, timeFactor: 1 },
     { id: 'hall', name: 'Propulsión eléctrica Hall ×4', ref: 'Propulsores AEPS del Gateway', prop: 'xenon', isp: 2800, thrust: 0.0024, mass: 900, cost: 120, power: 50000, reliability: 0.99, timeFactor: 2.2 },
-    { id: 'ntr', name: 'Nuclear térmico', ref: 'Programa DRACO (NASA/DARPA), heredero de NERVA', prop: 'lh2', isp: 900, thrust: 111, mass: 3500, cost: 900, power: 0, reliability: 0.96, timeFactor: 1 },
+    { id: 'ntr', name: 'Nuclear térmico', ref: 'Programa DRACO (NASA/DARPA), heredero de NERVA; permite viajes 20 % más cortos', prop: 'lh2', isp: 900, thrust: 111, mass: 3500, cost: 900, power: 0, reliability: 0.96, timeFactor: 0.8 },
   ],
   tanks: [
     { id: 's', name: 'Tanque pequeño', ref: 'Similar a un tanque de módulo de servicio de Dragon', capacity: 3000, cost: 10 },
     { id: 'm', name: 'Tanque mediano', ref: 'Similar al Módulo de Servicio Europeo de Orion (8,6 t)', capacity: 9000, cost: 40 },
     { id: 'l', name: 'Etapa de crucero', ref: 'Similar a una etapa superior criogénica', capacity: 30000, cost: 90 },
-    { id: 'xl', name: 'Etapa de transferencia pesada', ref: 'Arquitecturas de Marte (DRA 5.0)', capacity: 90000, cost: 200 },
+    { id: 'lx', name: 'Tanque criogénico doble', ref: 'Dos etapas de crucero en tándem', capacity: 50000, cost: 140 },
+    { id: 'xl', name: 'Etapa de transferencia pesada', ref: 'Etapa de salida para espacio profundo', capacity: 90000, cost: 200 },
+    { id: 'xxl', name: 'Núcleo con tanques en línea', ref: 'Vehículo de tránsito a Marte de la NASA (DRA 5.0)', capacity: 180000, cost: 350 },
   ],
   power: [
     { id: 'ultraflex', name: 'Abanicos UltraFlex', ref: 'Cygnus, InSight y Lucy', output: 7000, solar: true, mass: 250, cost: 25 },

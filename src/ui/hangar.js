@@ -2,6 +2,7 @@
 import { INSTRUMENTS } from '../data/catalog.js';
 import { PARTS, SLOTS, PROPELLANTS, PAINTS, ACCENTS, LIVERIES, FINISH_LIST, MLI_LIST } from '../data/parts.js';
 import { SHAPES, SYMBOLS, INSIGNIA_BG, drawInsignia } from '../app/insignia.js';
+import { PRESETS } from '../data/presets.js';
 import { esc, money, kg, fmt, radio, swatches, chips } from './common.js';
 
 /** Vista previa de la insignia como imagen (mismo dibujo que se pinta en la nave). */
@@ -28,10 +29,35 @@ function partStats(slot, p, ev) {
   }
 }
 
-export function hangar(state, ev, slot, insignia) {
+/** Galería de naves de fábrica (fichas con imagen, misión y lección de ingeniería). */
+function presets(state, summaries, canUndo) {
+  return `${canUndo ? '<p class="undo"><span>Se cargó una nave de fábrica.</span><button type="button" class="btn btn--small" data-undo-preset>Volver a mi diseño</button></p>' : ''}
+  <ul class="presets">
+    ${PRESETS.map((p) => {
+      const s = summaries?.[p.id];
+      const active = state.presetId === p.id;
+      return `<li class="preset" ${active ? 'data-active' : ''}>
+        <img class="preset__img" src="/presets/${p.id}.webp" alt="Nave ${esc(p.name)}" width="320" height="240" loading="lazy" />
+        <div class="preset__body">
+          <p class="preset__family">${esc(p.family)}</p>
+          <h4 class="preset__name">${esc(p.name)}</h4>
+          <p class="preset__tag">${esc(p.tagline)}</p>
+          ${s ? `<p class="preset__meta num">${esc(s.dest)} · ${esc(s.engine)} · ${s.crew} tripulantes · ${fmt(s.days)} días · ${money(s.cost)}${s.fails ? '' : ' · <strong>lista para volar</strong>'}</p>` : ''}
+          <p class="preset__lesson">${esc(p.lesson)}</p>
+          ${active ? '<span class="tag">En uso</span>' : `<button type="button" class="btn btn--small btn--go" data-preset="${p.id}">Usar esta nave</button>`}
+        </div>
+      </li>`;
+    }).join('')}
+  </ul>
+  <p class="hint">Cada nave ya está probada con la física del juego. Úsala tal cual o cámbiale piezas y colores en las otras pestañas.</p>`;
+}
+
+export function hangar(state, ev, slot, insignia, extra = {}) {
   const tabs = SLOTS.map((s) => `<button type="button" class="tab" data-slot="${s.id}" ${slot === s.id ? 'aria-selected="true"' : ''}>${s.name}</button>`).join('');
   let body = '';
-  if (slot === 'paint') {
+  if (slot === 'presets') {
+    body = presets(state, extra.summaries, extra.canUndo);
+  } else if (slot === 'paint') {
     body = `<label class="field"><span>Nombre de la nave</span><input type="text" name="ship.name" value="${esc(state.ship.name)}" maxlength="16" autocomplete="off" placeholder="Esperanza" /></label>
       <h3>Casco</h3>${swatches('ship.paint', PAINTS, state.ship.paint, true)}
       <h3>Acento</h3>${swatches('ship.accent', ACCENTS, state.ship.accent, true)}

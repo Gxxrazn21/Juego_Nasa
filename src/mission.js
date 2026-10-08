@@ -79,6 +79,8 @@ export function buildRoute(state, dest, ship) {
   const direct = directInjection(state);
   const stops = new Set(state.stops);
   const slow = ship.engine.timeFactor;
+  // Trayectorias rápidas (motor nuclear): menos días de viaje a cambio de ~12 % más Δv de salida y regreso
+  const fast = slow < 1 ? 1.12 : 1;
   const pilot = state.crew.some((c) => c.role === 'piloto') ? 0.95 : 1;
 
   steps.push({ type: 'launch', name: direct ? 'Lanzamiento con inyección directa' : 'Lanzamiento a órbita baja', region: 'leo', days: 0.2 });
@@ -116,17 +118,17 @@ export function buildRoute(state, dest, ship) {
     }
     steps.push({ type: 'burn', name: 'Inyección transterrestre (TEI)', dv: nrho ? 0.45 : 0.85, days: 3 * slow, region: 'deep' });
   } else if (dest.id === 'mars') {
-    steps.push({ type: 'burn', name: 'Inyección trans-marciana (TMI)', dv: direct ? 3.6 - ESCAPE_DV : 3.6, days: 210 * slow, region: 'deep' });
+    steps.push({ type: 'burn', name: 'Inyección trans-marciana (TMI)', dv: (direct ? 3.6 - ESCAPE_DV : 3.6) * fast, days: 210 * slow, region: 'deep' });
     steps.push({ type: 'burn', name: 'Inserción en órbita marciana (MOI)', dv: 2.1 * pilot, days: 0.5, region: 'deep' });
     steps.push({ type: 'stay', name: 'Operaciones en órbita de Marte', days: dest.stay, region: 'deep' });
-    steps.push({ type: 'burn', name: 'Inyección de regreso (TEI)', dv: 2.1, days: 250 * slow, region: 'deep' });
+    steps.push({ type: 'burn', name: 'Inyección de regreso (TEI)', dv: 2.1 * fast, days: 250 * slow, region: 'deep' });
   } else if (dest.id === 'neo') {
     const t = dest.transfer;
     const dep = direct ? Math.max(0.05, t.departureFromLeo - ESCAPE_DV) : t.departureFromLeo;
-    steps.push({ type: 'burn', name: `Salida hacia ${dest.name}`, dv: dep, days: t.transferDays * slow, region: 'deep' });
+    steps.push({ type: 'burn', name: `Salida hacia ${dest.name}`, dv: dep * fast, days: t.transferDays * slow, region: 'deep' });
     steps.push({ type: 'burn', name: 'Encuentro con el asteroide', dv: t.arrivalDv * pilot, days: 0.5, region: 'deep' });
     steps.push({ type: 'stay', name: 'Exploración del asteroide', days: dest.stay, region: 'deep' });
-    steps.push({ type: 'burn', name: 'Regreso a la Tierra', dv: t.arrivalDv, days: t.transferDays * slow, region: 'deep' });
+    steps.push({ type: 'burn', name: 'Regreso a la Tierra', dv: t.arrivalDv * fast, days: t.transferDays * slow, region: 'deep' });
   }
   steps.push({ type: 'reentry', name: 'Reentrada atmosférica', speed: dest.reentry, region: 'leo' });
   return steps;
@@ -213,7 +215,8 @@ export function evaluate(state, nasa = {}) {
   // --- Ruta y víveres ---
   const steps = buildRoute(state, dest, ship);
   const routeDays = steps.reduce((a, s) => a + (s.days ?? 0), 0);
-  const consNeeded = crewN * ship.life.rate * routeDays * 1.1;
+  // Víveres al despegar: lo de la ruta + 10 % + 5 días de reserva (si caben)
+  const consNeeded = crewN * ship.life.rate * (routeDays * 1.1 + 5);
   const cons0 = Math.min(storage, consNeeded);
   const prop0 = Math.min(state.propLoad, tankCapacity);
   const route = flyRoute(steps, { dryMass, tankCapacity, storage, engine: ship.engine, propType, crewN, life: ship.life, prop0, cons0 });
@@ -295,9 +298,9 @@ export function evaluate(state, nasa = {}) {
     check('docking', 'Acoplamiento', !needsDock || ship.docking.id !== 'none' ? 'ok' : 'fail',
       needsDock ? (ship.docking.id === 'none' ? 'La ruta necesita acoplarse y no hay puerto' : `${ship.docking.name} listo`) : 'No se requiere',
       'Para visitar estaciones, ensamblar en órbita o recibir a la tripulación hace falta un puerto IDSS.'),
-    landing ? check('landing', 'Alunizaje', ship.legs.id === 'none' ? 'fail' : twr >= 1.5 ? 'ok' : twr >= 1 ? 'warn' : 'fail',
-      ship.legs.id === 'none' ? 'Falta el tren de aterrizaje' : `Empuje/peso lunar ${twr.toFixed(2)} (mínimo 1,5)`,
-      'El motor debe vencer la gravedad lunar (1,62 m/s²) con margen para frenar y maniobrar.') : null,
+    landing ? check('landing', 'Alunizaje', ship.legs.id === 'none' ? 'fail' : twr >= 1.4 ? 'ok' : twr >= 1 ? 'warn' : 'fail',
+      ship.legs.id === 'none' ? 'Falta el tren de aterrizaje' : `Empuje/peso lunar ${twr.toFixed(2)} (recomendado ≥ 1,4)`,
+      'El motor debe vencer la gravedad lunar (1,62 m/s²) con margen para frenar y maniobrar. El módulo lunar del Apolo empezaba el descenso con ~1,8.') : null,
     check('science', 'Carga científica', instruments.length <= sciSlots ? 'ok' : 'fail',
       `${instruments.length} de ${sciSlots} espacios`,
       'Los hábitats agregan espacio para experimentos; la cápsula sola tiene muy poco.'),
@@ -452,6 +455,35 @@ export function simulate(state, ev, flares = []) {
     if (ev.dose > CAREER_DOSE && !lostCrew) log.push({ t: 'Revisión', kind: 'warn', text: `La tripulación superó el límite de radiación (${fmt(ev.dose)} mSv).` });
     return { ok: outcome === 'ok', outcome, lostCrew, log, science, explore, score, grade, landed, reached };
   }
+}
+
+/** Propelente mínimo al despegar para completar la ruta con 5 % de reserva (búsqueda binaria). */
+export function minimalPropellant(state, nasa = {}) {
+  const cap = evaluate(state, nasa).tankCapacity;
+  const works = (load) => {
+    const e = evaluate({ ...state, propLoad: load }, nasa);
+    return e.route.failure?.reason !== 'prop' && e.route.finalProp >= cap * 0.05;
+  };
+  if (!works(cap)) return cap;
+  let lo = 0, hi = cap;
+  for (let i = 0; i < 22; i++) {
+    const mid = (lo + hi) / 2;
+    if (works(mid)) hi = mid; else lo = mid;
+  }
+  return Math.ceil(hi / 10) * 10;
+}
+
+/** Aplica una nave de fábrica: conserva los nombres de la tripulación y el traje elegido. */
+export function presetState(state, preset, nasa = {}) {
+  const next = structuredClone(state);
+  Object.assign(next, { land: false, neoId: null }, preset.mission);
+  next.crew = preset.crewRoles.map((role, i) => ({ name: state.crew[i]?.name ?? newCrewMember({ crew: next.crew ?? [] }).name, role }));
+  next.ship = { ...state.ship, ...preset.ship, ...preset.look };
+  next.look = { ...state.look, patch: preset.patch, insignia: { ...preset.insignia, upload: null } };
+  next.instruments = [...preset.instruments];
+  next.presetId = preset.id;
+  next.propLoad = minimalPropellant(next, nasa);
+  return next;
 }
 
 export function newCrewMember(state) {
