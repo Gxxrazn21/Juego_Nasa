@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultState, evaluate, simulate } from '../src/mission.js';
+import { defaultState, evaluate, simulate, paintHex, accentHex } from '../src/mission.js';
 import { FALLBACK_NEOS } from '../src/data/catalog.js';
 import { FALLBACK_FLARES } from '../src/data/fallback.js';
 
@@ -66,4 +66,18 @@ test('Todos los destinos evalúan y simulan sin NaN', () => {
     assert.ok(Number.isFinite(r.score), destination);
     for (const l of r.log) assert.ok(!/NaN|undefined/.test(l.text), `${destination}: ${l.text}`);
   }
+});
+
+test('Cada entrada de la bitácora trae telemetría (día, propelente, víveres)', () => {
+  const s = defaultState();
+  const r = simulate(s, evaluate(s, nasa), FALLBACK_FLARES);
+  for (const l of r.log.filter((x) => x.t !== 'Revisión')) {
+    assert.ok(l.tele && Number.isFinite(l.tele.day) && Number.isFinite(l.tele.prop) && Number.isFinite(l.tele.cons), l.text);
+  }
+});
+
+test('Los colores admiten la paleta o un hex personalizado', () => {
+  assert.equal(paintHex('#12ab34'), '#12ab34');
+  assert.equal(paintHex('white'), '#e9e6df');
+  assert.equal(accentHex('nada'), '#f26a2e');
 });

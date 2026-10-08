@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { PROPELLANTS } from '../data/parts.js';
 import { glowSprite } from './bodies.js';
+import { drawInsignia } from '../app/insignia.js';
 
 const SOLAR_W_PER_M2 = 1361 * 0.29 * 0.85;
 
@@ -31,32 +32,83 @@ function solarCellTexture() {
 }
 const cellTex = solarCellTexture();
 
-/** Parche de la misión dibujado en canvas (se pega en la cápsula). */
-export function patchTexture(text, agency, accent) {
+export const FINISHES = { satinado: [0.45, 0.15], mate: [0.85, 0], metalico: [0.28, 0.75] };
+export const MLI_COLORS = { oro: [0xd9a441, 0.35, 0.85], plata: [0xc9ccd2, 0.3, 0.9], negro: [0x1d1d22, 0.55, 0.3] };
+
+function luminance(hex) {
+  const c = new THREE.Color(hex);
+  return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+}
+
+/** Insignia de la misión como textura. */
+function insigniaTexture(opts) {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
-  const ctx = c.getContext('2d');
-  ctx.translate(128, 128);
-  ctx.fillStyle = accent;
-  ctx.beginPath(); ctx.arc(0, 0, 124, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#14182a';
-  ctx.beginPath(); ctx.arc(0, 0, 108, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#f3ead8';
-  for (let i = 0; i < 14; i++) {
-    const a = i * 2.4, r = 30 + ((i * 37) % 60);
-    ctx.fillRect(Math.cos(a) * r, Math.sin(a) * r - 20, 3, 3);
-  }
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 6;
-  ctx.beginPath(); ctx.moveTo(-60, 40); ctx.quadraticCurveTo(0, -60, 70, -30); ctx.stroke();
-  ctx.fillStyle = '#f3ead8';
-  ctx.textAlign = 'center';
-  ctx.font = 'bold 34px "Big Shoulders Display", sans-serif';
-  ctx.fillText((text || 'MISIÓN').slice(0, 12).toUpperCase(), 0, 76);
-  ctx.font = 'bold 20px sans-serif';
-  ctx.fillText((agency || '').slice(0, 14), 0, -70);
+  drawInsignia(c, opts);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
+  return { texture: t, canvas: c };
+}
+
+/**
+ * Pintura del casco para superficies cilíndricas (tanques, hábitat): color base,
+ * patrón de librea, nombre de la nave y la insignia. u recorre la circunferencia.
+ */
+function liveryTexture(circumference, length, look, base, insignia) {
+  const W = 1024;
+  const H = Math.round(Math.min(2048, Math.max(96, (W * length) / circumference)));
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, W, H);
+  const accent = look.accent ?? '#f26a2e';
+  switch (look.livery) {
+    case 'bandas':
+      ctx.fillStyle = accent;
+      ctx.fillRect(0, 0, W, Math.max(6, H * 0.07));
+      ctx.fillRect(0, H - Math.max(6, H * 0.07), W, Math.max(6, H * 0.07));
+      break;
+    case 'ajedrez': // patrón de rotación como el del Saturno V
+      ctx.fillStyle = '#1a1b20';
+      for (let col = 0; col < 4; col++) for (let row = 0; row < 2; row++) {
+        if ((col + row) % 2) ctx.fillRect((col * W) / 4, (row * H) / 2, W / 4, H / 2);
+      }
+      break;
+    case 'bicolor':
+      ctx.fillStyle = accent;
+      ctx.fillRect(0, H * 0.55, W, H * 0.45);
+      break;
+    case 'carreras':
+      ctx.fillStyle = accent;
+      ctx.fillRect(W * 0.22, 0, W * 0.03, H);
+      ctx.fillRect(W * 0.27, 0, W * 0.03, H);
+      ctx.fillRect(W * 0.72, 0, W * 0.03, H);
+      ctx.fillRect(W * 0.77, 0, W * 0.03, H);
+      break;
+    default:
+  }
+  const name = (look.name || '').toUpperCase().slice(0, 16);
+  const ink = luminance(base) > 0.45 ? '#16181f' : '#f3ead8';
+  const size = Math.min(H * 0.42, 64);
+  const drawWrapped = (fn) => { for (const off of [-W, 0, W]) { ctx.save(); ctx.translate(off, 0); fn(); ctx.restore(); } };
+  if (name && size >= 12) {
+    ctx.fillStyle = look.livery === 'ajedrez' ? accent : ink;
+    ctx.font = `800 ${Math.round(size)}px "Big Shoulders Display", "Arial Narrow", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    drawWrapped(() => { ctx.fillText(name, W * 0.1, H / 2); ctx.fillText(name, W * 0.6, H / 2); });
+  }
+  if (insignia && H >= 80) {
+    const s = Math.min(H * 0.75, W * 0.11);
+    drawWrapped(() => {
+      ctx.drawImage(insignia, W * 0.38 - s / 2, H / 2 - s / 2, s, s);
+      ctx.drawImage(insignia, W * 0.88 - s / 2, H / 2 - s / 2, s, s);
+    });
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
   return t;
 }
 
@@ -79,12 +131,16 @@ function bell(throat, exit, length, segments = 48) {
 export function buildShip(ev, look = {}) {
   const { ship } = ev;
   const g = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({ color: look.paint ?? '#e9e6df', roughness: 0.45, metalness: 0.15 });
+  const [rough, metalF] = FINISHES[look.finish] ?? FINISHES.satinado;
+  const paintHex = look.paint ?? '#e9e6df';
+  const paint = new THREE.MeshStandardMaterial({ color: paintHex, roughness: rough, metalness: metalF });
+  const insignia = insigniaTexture({ ...look.insignia, accent: look.accent ?? '#f26a2e' });
   const accent = new THREE.MeshStandardMaterial({ color: look.accent ?? '#f26a2e', roughness: 0.5, metalness: 0.1 });
   const metal = new THREE.MeshStandardMaterial({ color: 0xb9bcc4, roughness: 0.3, metalness: 0.9 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x2a2c33, roughness: 0.55, metalness: 0.6 });
   const nozzleMat = new THREE.MeshStandardMaterial({ color: 0x3b3833, roughness: 0.4, metalness: 0.85, side: THREE.DoubleSide });
-  const mli = new THREE.MeshStandardMaterial({ color: 0xd9a441, roughness: 0.35, metalness: 0.85 });
+  const [mliColor, mliRough, mliMetal] = MLI_COLORS[look.mli] ?? MLI_COLORS.oro;
+  const mli = new THREE.MeshStandardMaterial({ color: mliColor, roughness: mliRough, metalness: mliMetal });
   const glass = new THREE.MeshStandardMaterial({ color: 0x0b0f1a, roughness: 0.05, metalness: 1 });
   const focus = {};
 
@@ -162,20 +218,17 @@ export function buildShip(ev, look = {}) {
   const volume = ship.tanks.capacity / pd.density;
   const rt = Math.min(R * 1.8, Math.max(R * 0.9, Math.cbrt(volume / (6 * Math.PI))));
   const L = Math.max(1.2, volume / (Math.PI * rt * rt));
-  const tankMat = ship.engine.prop === 'hidrolox' || ship.engine.prop === 'lh2' || ship.engine.prop === 'metalox'
-    ? paint.clone() : paint;
-  const tank = new THREE.Mesh(new THREE.CylinderGeometry(rt, rt, L, 48), tankMat);
+  const tankMat = paint;
+  const liveryMat = paint.clone();
+  liveryMat.color.set(0xffffff);
+  liveryMat.map = liveryTexture(2 * Math.PI * rt, L, look, paintHex, insignia.canvas);
+  const tank = new THREE.Mesh(new THREE.CylinderGeometry(rt, rt, L, 64), liveryMat);
   tank.position.y = y + L / 2;
   g.add(tank);
   const dome = new THREE.Mesh(new THREE.SphereGeometry(rt, 48, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), tankMat);
   dome.scale.y = 0.35;
   dome.position.y = y;
   g.add(dome);
-  for (const yy of [y + 0.15, y + L - 0.15]) {
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(rt * 1.01, rt * 1.01, 0.25, 48), accent);
-    band.position.y = yy;
-    g.add(band);
-  }
   focus.tanks = { y: y + L / 2, r: Math.max(rt * 3, L * 1.2) };
   const tankBottom = y;
   y += L;
@@ -276,8 +329,8 @@ export function buildShip(ev, look = {}) {
   }
   // parche de la misión
   const patch = new THREE.Mesh(
-    new THREE.CircleGeometry(0.5, 40),
-    new THREE.MeshStandardMaterial({ map: patchTexture(look.patch, look.agency, look.accent), roughness: 0.6, transparent: true }),
+    new THREE.PlaneGeometry(1.05, 1.05),
+    new THREE.MeshStandardMaterial({ map: insignia.texture, roughness: 0.6, transparent: true, alphaTest: 0.05 }),
   );
   const patchH = c === 'soyuz' ? 0.8 : 1.4;
   patch.position.set(0, y + patchH, radiusAt(profile, patchH) + 0.02);
@@ -299,9 +352,21 @@ export function buildShip(ev, look = {}) {
     g.add(adapter);
     y += 0.6;
     const dims = { beam: [1.6, 4.0], halo: [1.5, 7.0], b330: [3.35, 13.7] }[h];
-    const fabric = new THREE.MeshStandardMaterial({ color: 0xf1eee6, roughness: 0.9 });
-    const bodyMat = h === 'halo' ? paint : fabric;
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(dims[0], dims[1] - dims[0] * 2, 12, 48), bodyMat);
+    const habBase = h === 'halo' ? paintHex : '#f1eee6';
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: h === 'halo' ? rough : 0.9,
+      metalness: h === 'halo' ? metalF : 0,
+      map: liveryTexture(2 * Math.PI * dims[0], dims[1], look, habBase, insignia.canvas),
+    });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(dims[0], dims[0], dims[1] - dims[0] * 0.6, 64), bodyMat);
+    for (const k of [-1, 1]) {
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(dims[0], 48, 12, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: habBase, roughness: bodyMat.roughness, metalness: bodyMat.metalness }));
+      cap.scale.y = 0.3;
+      cap.rotation.x = k < 0 ? Math.PI : 0;
+      cap.position.y = y + dims[1] / 2 + k * (dims[1] - dims[0] * 0.6) / 2;
+      g.add(cap);
+    }
     body.position.y = y + dims[1] / 2;
     g.add(body);
     if (h !== 'halo') {
@@ -365,7 +430,36 @@ export function buildShip(ev, look = {}) {
   });
   focus.science = { y: smY, r: R * 3.5 };
 
-  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  // ---------- Luces de navegación: roja a babor, verde a estribor, estroboscópicas blancas ----------
+  const lights = [
+    [0xff3b30, new THREE.Vector3(-(R + 0.18), smY + smH * 0.42, 0), 0],
+    [0x34e07a, new THREE.Vector3(R + 0.18, smY + smH * 0.42, 0), 0],
+    [0xffffff, new THREE.Vector3(0, y + 0.15, 0), 0.1],
+    [0xffffff, new THREE.Vector3(0, tankBottom - 0.2, rt * 0.6), 0.7],
+  ];
+  for (const [color, pos, blink] of lights) {
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), new THREE.MeshBasicMaterial({ color }));
+    bulb.position.copy(pos);
+    bulb.add(glowSprite(color, 0.9));
+    if (blink) bulb.userData.blink = blink;
+    g.add(bulb);
+  }
+
+  // ---------- Llama del motor (visible en el encendido) ----------
+  const plumeColor = { hall: 0x7fb4ff, ntr: 0xcfe3ff, rvac: 0xff9a5a, rl10: 0xbfd2ff, aj10: 0xffb070 }[ship.engine.id];
+  const plumeLen = ship.engine.id === 'hall' ? 5 : 9;
+  const plume = new THREE.Mesh(
+    new THREE.ConeGeometry(ship.engine.id === 'hall' ? R * 0.8 : 1.4, plumeLen, 32, 1, true),
+    new THREE.MeshBasicMaterial({ color: plumeColor, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  plume.geometry.translate(0, -plumeLen / 2, 0);
+  plume.position.y = engineBottom;
+  plume.add(glowSprite(plumeColor, 6));
+  plume.name = 'plume';
+  plume.visible = false;
+  g.add(plume);
+
+  g.traverse((o) => { if (o.isMesh && o.material.blending !== THREE.AdditiveBlending) { o.castShadow = true; o.receiveShadow = true; } });
   const bottom = Math.min(engineBottom, ship.legs.id !== 'none' ? Math.min(engineBottom, tankBottom) - 0.6 : engineBottom);
   focus.all = { y: (y + bottom) / 2, r: Math.max(10, (y - bottom) * 1.1) };
   return { group: g, focus, height: y, bottom };

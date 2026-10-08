@@ -93,17 +93,24 @@ const atmoFragment = /* glsl */ `
   }
 `;
 
-/** Tierra con mapas reales. sunDir debe estar en coordenadas de mundo. */
-export function createEarth(radius, segments = 128) {
+const earthMaps = (size) => ({
+  day: tex(`/textures/earth_day_${size}.jpg`),
+  night: tex(`/textures/earth_night_${size}.jpg`),
+  brc: tex(`/textures/earth_bump_roughness_clouds_${size}.jpg`, false),
+});
+
+/** Tierra con mapas reales. sunDir debe estar en coordenadas de mundo. texSize: 4096 o 2048. */
+export function createEarth(radius, segments = 128, texSize = 2048) {
+  const maps = earthMaps(texSize);
   const group = new THREE.Group();
   const sunDir = { value: new THREE.Vector3(1, 0.3, 0.5).normalize() };
   const surface = new THREE.Mesh(
     new THREE.SphereGeometry(radius, segments, segments / 2),
     new THREE.ShaderMaterial({
       uniforms: {
-        dayMap: { value: tex('/textures/earth_day_4096.jpg') },
-        nightMap: { value: tex('/textures/earth_night_4096.jpg') },
-        brcMap: { value: tex('/textures/earth_bump_roughness_clouds_4096.jpg', false) },
+        dayMap: { value: maps.day },
+        nightMap: { value: maps.night },
+        brcMap: { value: maps.brc },
         sunDir,
       },
       vertexShader: earthVertex,
@@ -125,6 +132,11 @@ export function createEarth(radius, segments = 128) {
   group.add(surface, atmosphere);
   group.userData.surface = surface;
   group.userData.setSun = (dir) => sunDir.value.copy(dir).normalize();
+  group.userData.setTextureSize = (size) => {
+    const m = earthMaps(size);
+    const u = surface.material.uniforms;
+    u.dayMap.value = m.day; u.nightMap.value = m.night; u.brcMap.value = m.brc;
+  };
   return group;
 }
 

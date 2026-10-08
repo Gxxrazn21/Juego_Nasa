@@ -2,25 +2,61 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Delta-V · Arquitecto de Misiones</title>
-    <meta name="description" content="Diseña, lanza y simula una misión espacial completa con datos públicos de la NASA. NASA Space Apps Challenge 2026." />
+    <meta name="description" content="Crea tu astronauta, arma tu nave pieza por pieza y vuela una misión real con datos públicos de la NASA. NASA Space Apps Challenge 2026." />
+    <meta name="theme-color" content="#0b0d14" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Delta-V" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Big+Shoulders+Display:wght@500;700;800&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="stage" aria-hidden="true"></div>
+    <div class="loader" id="loader" role="status" aria-live="polite">
+      <p class="loader__title">Cargando la Tierra</p>
+      <div class="loader__bar"><span id="loader-bar"></span></div>
+      <p class="loader__note">Mapas satelitales y modelos 3D de la NASA</p>
+    </div>
+    <div class="countdown" id="countdown" aria-live="assertive" hidden></div>
 
     <header class="brand">
       <p class="brand__mark">Δv</p>
-      <div>
+      <div class="brand__text">
         <h1 class="brand__name">Arquitecto de Misiones</h1>
         <p class="brand__sub">NASA Space Apps 2026 · Space Mission Design Game</p>
       </div>
       <ul class="feeds" id="feeds" aria-label="Fuentes de datos NASA"></ul>
     </header>
+
+    <div class="hud-actions">
+      <button type="button" class="hud-btn" id="expand" aria-pressed="false" aria-label="Ampliar la vista 3D" title="Ampliar la vista 3D">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
+      </button>
+      <button type="button" class="hud-btn" id="mute" aria-pressed="false" aria-label="Silenciar" title="Sonido">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" /><path class="wave" d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11" /></svg>
+      </button>
+      <button type="button" class="hud-btn" popovertarget="settings" aria-label="Ajustes" title="Ajustes">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" /></svg>
+      </button>
+    </div>
+
+    <div id="settings" class="settings" popover>
+      <h2>Ajustes</h2>
+      <fieldset>
+        <legend>Calidad gráfica</legend>
+        <div class="chips" id="quality-options"></div>
+        <p class="hint" id="quality-hint"></p>
+      </fieldset>
+      <button type="button" class="btn btn--go" id="install" hidden>Instalar como app</button>
+      <p class="hint" id="install-hint">En el celular: menú del navegador → «Agregar a la pantalla de inicio».</p>
+    </div>
 
     <nav class="phases" id="phases" aria-label="Fases de la misión"></nav>
 

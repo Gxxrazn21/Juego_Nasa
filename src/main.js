@@ -4,11 +4,17 @@ import { defaultState, evaluate, simulate, newCrewMember, paintHex, accentHex, f
 import { loadSpaceWeather, loadNeos, loadApod, solarActivity } from './nasa.js';
 import { SUITS, ROLES, SUIT_COLORS } from './data/crew.js';
 import { PARTS } from './data/parts.js';
-import * as ui from './ui.js';
+import { QUALITY, resolveQuality, detectQuality, hasWebGL } from './app/quality.js';
+import { sfx, setSound } from './app/audio.js';
+import { fileToLogo, preloadLogo } from './app/insignia.js';
+import { setupInstall } from './app/pwa.js';
+import * as ui from './ui/index.js';
 
 const STORAGE_KEY = 'deltav.crewed.v1';
+const PREFS_KEY = 'deltav.prefs.v1';
 
 const state = restore() ?? defaultState();
+const prefs = { quality: 'auto', sound: true, ...readJSON(PREFS_KEY) };
 const nasa = { flares: [], cmes: [], neos: [], activity: null, weatherLive: null, neosLive: null, apod: null };
 let phase = 'mission';
 let slot = 'capsule';
@@ -18,9 +24,28 @@ const $sheet = document.getElementById('sheet');
 const $phases = document.getElementById('phases');
 const $budgets = document.getElementById('budgets');
 const $feeds = document.getElementById('feeds');
-const stage = createStage(document.getElementById('stage'));
+const $loader = document.getElementById('loader');
+const $countdown = document.getElementById('countdown');
+setSound(prefs.sound);
 
+// ---------- escena 3D (con alternativa si no hay WebGL) ----------
+const stage = hasWebGL()
+  ? createStage(document.getElementById('stage'), { quality: resolveQuality(prefs.quality), onProgress: loading })
+  : noStage();
 if (import.meta.env.DEV) window.__deltav = { stage, state };
+
+function noStage() {
+  document.getElementById('stage').innerHTML = '<p class="no-webgl">Tu navegador no tiene WebGL: el juego funciona, pero sin la vista 3D.</p>';
+  loading(1);
+  const noop = () => {};
+  return { setShip: noop, focusSlot: noop, setCrew: noop, setMode: noop, showMap: noop, setProgress: noop, showDock: noop, setQuality: noop, ignite: noop, resize: noop, mode: 'none' };
+}
+
+function loading(p) {
+  document.getElementById('loader-bar').style.transform = `scaleX(${Math.max(0.05, p)})`;
+  if (p >= 1) setTimeout(() => $loader.classList.add('is-done'), 250);
+}
+setTimeout(() => loading(1), 15000); // nunca bloquear el juego por una textura lenta
 
 let ev = evaluate(state, nasa);
 let lastShipKey = '';
@@ -37,36 +62,57 @@ function suitLook() {
   return { suit, colors };
 }
 function shipLook() {
-  return { paint: paintHex(state.ship.paint), accent: accentHex(state.ship.accent), patch: state.look.patch, agency: state.look.agency };
+  const { ship, look } = state;
+  return {
+    paint: paintHex(ship.paint),
+    accent: accentHex(ship.accent),
+    livery: ship.livery,
+    finish: ship.finish,
+    mli: ship.mli,
+    name: ship.name,
+    insignia: { ...look.insignia, accent: accentHex(ship.accent), top: look.agency, bottom: look.patch, stars: state.crew.length },
+  };
 }
 
-function syncScene() {
-  const shipKey = JSON.stringify([state.ship, state.instruments, state.look.patch, state.look.agency]);
+let shipTimer;
+function syncScene({ debounce = false } = {}) {
+  const shipKey = JSON.stringify([state.ship, state.instruments, state.look.patch, state.look.agency, state.look.insignia, state.crew.length]);
   if (shipKey !== lastShipKey) {
-    stage.setShip(ev, shipLook());
-    lastShipKey = shipKey;
-    if (stage.mode === 'hangar') stage.focusSlot(slot);
+    clearTimeout(shipTimer);
+    const apply = () => {
+      stage.setShip(ev, shipLook());
+      lastShipKey = shipKey;
+      if (stage.mode === 'hangar') stage.focusSlot(focusFor(slot));
+    };
+    if (debounce) shipTimer = setTimeout(apply, 220); else apply();
   }
   const crewKey = JSON.stringify([state.crew, state.look.suit, state.look.suitColor, state.ship.accent]);
   if (crewKey !== lastCrewKey) {
-    const { suit, colors } = suitLook();
-    stage.setCrew(state, suit, colors);
-    lastCrewKey = crewKey;
+    clearTimeout(crewTimer);
+    const apply = () => {
+      const { suit, colors } = suitLook();
+      stage.setCrew(state, suit, colors);
+      lastCrewKey = crewKey;
+    };
+    if (debounce) crewTimer = setTimeout(apply, 400); else apply();
   }
 }
+let crewTimer;
 
-function render({ sheet = true } = {}) {
+const focusFor = (s) => (s === 'insignia' ? 'capsule' : s);
+
+function render({ sheet = true, debounce = false } = {}) {
   ev = evaluate(state, nasa);
   $phases.innerHTML = ui.phasesNav(phase, ev, !!flightRun);
   $budgets.innerHTML = ui.budgets(ev);
   $feeds.innerHTML = ui.feeds(nasa);
-  syncScene();
+  syncScene({ debounce });
   if (!sheet) return;
   const scroll = $sheet.scrollTop;
   switch (phase) {
     case 'mission': $sheet.innerHTML = ui.mission(state, ev, nasa); break;
     case 'crew': $sheet.innerHTML = ui.crew(state, ev); break;
-    case 'hangar': $sheet.innerHTML = ui.hangar(state, ev, slot); break;
+    case 'hangar': $sheet.innerHTML = ui.hangar(state, ev, slot, slot === 'insignia' ? ui.insigniaPreview(shipLook().insignia) : null); break;
     case 'route': $sheet.innerHTML = ui.route(state, ev); break;
     case 'review': $sheet.innerHTML = ui.review(state, ev); break;
     case 'flight': $sheet.innerHTML = ui.flight(state, ev, flightRun.result, flightRun.revealed, flightRun.done); break;
@@ -80,7 +126,7 @@ function sceneFor(p) {
     stage.setMode('map');
     stage.showMap(ev);
   } else if (p === 'crew') stage.setMode('crew');
-  else if (p === 'hangar') { stage.setMode('hangar'); stage.focusSlot(slot); }
+  else if (p === 'hangar') { stage.setMode('hangar'); stage.focusSlot(focusFor(slot)); }
   else if (p === 'review') { stage.setMode('hangar'); stage.focusSlot('all'); }
 }
 
@@ -93,6 +139,8 @@ function goPhase(next) {
   enter();
   $sheet.scrollTop = 0;
   $sheet.focus({ preventScroll: true });
+  // en móvil, mantener visible la pestaña activa de la barra de fases
+  $phases.querySelector('[aria-current]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
 }
 
 let enterTimer;
@@ -104,8 +152,26 @@ function enter() {
   enterTimer = setTimeout(() => $sheet.classList.remove('is-entering'), 700);
 }
 
-// ---------- vuelo ----------
+// ---------- lanzamiento y vuelo ----------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+async function countdown() {
+  stage.setMode('hangar');
+  stage.focusSlot('all');
+  $countdown.hidden = false;
+  for (const n of reduceMotion ? ['¡Despegue!'] : ['3', '2', '1', '¡Despegue!']) {
+    $countdown.textContent = n;
+    $countdown.classList.remove('is-tick');
+    void $countdown.offsetWidth;
+    $countdown.classList.add('is-tick');
+    if (n === '1') stage.ignite(true);
+    if (n.startsWith('¡')) sfx.launch(); else sfx.countdown();
+    await sleep(reduceMotion ? 600 : 900);
+  }
+  stage.ignite(false);
+  $countdown.hidden = true;
+}
 
 async function launchMission() {
   ev = evaluate(state, nasa);
@@ -114,19 +180,23 @@ async function launchMission() {
   const run = { result, revealed: 0, done: false };
   flightRun = run;
   phase = 'flight';
-  stage.setMode('map');
-  stage.showMap(ev, { progress: 0 });
   render();
   enter();
+  await countdown();
+  if (flightRun !== run) return;
+  stage.setMode('map');
+  stage.showMap(ev, { progress: 0 });
   const n = result.log.length;
   for (let i = 0; i < n; i++) {
     if (flightRun !== run) return;
     const entry = result.log[i];
     run.revealed = i + 1;
+    if (entry.kind === 'fail') sfx.alarm();
     if (entry.scene === 'dock') {
       const { suit, colors } = suitLook();
       stage.setMode('dock');
       stage.showDock(entry.station, ev, { ...shipLook(), suit, colors });
+      sfx.dock();
       render();
       $sheet.scrollTop = $sheet.scrollHeight;
       await sleep(5200);
@@ -134,6 +204,7 @@ async function launchMission() {
       stage.setMode('map');
       stage.showMap(ev, { progress: i / n });
     } else {
+      if (entry.scene === 'burn' || entry.scene === 'land') sfx.burn();
       stage.setProgress((i + 1) / n);
       render();
       $sheet.scrollTop = $sheet.scrollHeight;
@@ -142,6 +213,7 @@ async function launchMission() {
   }
   if (flightRun !== run) return;
   run.done = true;
+  if (result.ok) sfx.success();
   render();
   $sheet.scrollTop = $sheet.scrollHeight;
 }
@@ -165,23 +237,26 @@ function autoPropellant() {
 // ---------- eventos ----------
 $phases.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-phase]');
-  if (btn && !btn.disabled) goPhase(btn.dataset.phase);
+  if (btn && !btn.disabled) { sfx.click(); goPhase(btn.dataset.phase); }
 });
 
 $sheet.addEventListener('click', (e) => {
   const t = e.target;
   const go = t.closest('[data-go]');
-  if (go) return goPhase(go.dataset.go);
+  if (go) { sfx.select(); return goPhase(go.dataset.go); }
   if (t.closest('[data-launch]')) return launchMission();
   const tab = t.closest('[data-slot]');
   if (tab) {
+    sfx.click();
     slot = tab.dataset.slot;
     render();
-    stage.focusSlot(slot);
+    stage.focusSlot(focusFor(slot));
+    tab.scrollIntoView({ block: 'nearest', inline: 'center' });
     return;
   }
   const step = t.closest('[data-step]');
   if (step) {
+    sfx.click();
     const key = step.dataset.step;
     state[key] = Math.max(1, state[key] + Number(step.dataset.delta));
     if (key === 'launches' && state.launches > 1) state.direct = false;
@@ -200,6 +275,10 @@ $sheet.addEventListener('click', (e) => {
     autoPropellant();
     return render();
   }
+  if (t.closest('[data-clear-logo]')) {
+    state.look.insignia.upload = null;
+    return render();
+  }
   if (t.closest('[data-copy]')) copyReport(t.closest('[data-copy]'));
 });
 
@@ -211,16 +290,35 @@ $sheet.addEventListener('input', (e) => {
     const out = e.target.closest('.slider')?.querySelector('output');
     if (out) out.textContent = `${fmt(+value)} kg`;
     render({ sheet: false });
-  } else if (type === 'text') {
+  } else if (type === 'text' || type === 'color') {
     applyPath(name, value);
-    render({ sheet: false });
+    if (type === 'color') {
+      const dot = e.target.nextElementSibling;
+      if (dot) { dot.style.background = value; dot.dataset.on = ''; }
+    }
+    render({ sheet: false, debounce: true });
+    const preview = $sheet.querySelector('.insignia-preview');
+    if (preview) preview.src = ui.insigniaPreview(shipLook().insignia);
   }
 });
 
-$sheet.addEventListener('change', (e) => {
-  const { name, value, type, checked } = e.target;
+$sheet.addEventListener('change', async (e) => {
+  const { name, value, type, checked, files } = e.target;
   if (!name) return;
-  if (type === 'range' || type === 'text') return render();
+  // Los textos ya se aplicaron en «input»: no se reconstruye la hoja para no perder el toque siguiente
+  if (type === 'text') return persist();
+  if (type === 'range') return render();
+  if (type === 'file') {
+    try {
+      const logo = await fileToLogo(files[0]);
+      await preloadLogo(logo);
+      state.look.insignia.upload = logo;
+      sfx.select();
+    } catch (err) {
+      alert(err.message);
+    }
+    return render();
+  }
   if (name === 'instrument') {
     state.instruments = checked ? [...state.instruments, value] : state.instruments.filter((x) => x !== value);
   } else if (name === 'stop') {
@@ -230,8 +328,10 @@ $sheet.addEventListener('change', (e) => {
   } else {
     applyPath(name, value);
   }
+  sfx.click();
   // reglas de consistencia
   if (name === 'ship.capsule') state.crew = state.crew.slice(0, PARTS.capsule.find((c) => c.id === value).seats);
+  if (name === 'insignia.symbol') state.look.insignia.upload = null;
   if (name === 'destination') {
     ensureNeo();
     if (value === 'iss') state.land = false;
@@ -250,6 +350,7 @@ function applyPath(name, value) {
     if (member) member[parts[2]] = value;
     return;
   }
+  if (parts[0] === 'insignia') { state.look.insignia[parts[1]] = value; return; }
   state[parts[0]][parts[1]] = value;
 }
 
@@ -263,7 +364,7 @@ async function copyReport(btn) {
   const r = flightRun.result;
   const text = [
     `Δv · Arquitecto de Misiones — Informe de vuelo`,
-    `Misión ${state.look.patch} (${state.look.agency}) → ${ev.dest.name} · ${fmt(ev.routeDays)} días`,
+    `Misión ${state.look.patch} (${state.look.agency}) · nave «${state.ship.name}» → ${ev.dest.name} · ${fmt(ev.routeDays)} días`,
     `Tripulación: ${state.crew.map((c) => `${c.name} (${ROLES.find((x) => x.id === c.role)?.name})`).join(', ')}`,
     `Nave: ${ev.ship.capsule.name} + ${ev.ship.engine.name} · ${fmt(ev.wetMass)} kg · ${ev.lv.name} ×${state.launches}`,
     `Escalas: ${ev.route.steps.filter((s) => s.type === 'dock').map((s) => s.refill.station.short).join(', ') || 'ninguna'}`,
@@ -277,18 +378,64 @@ async function copyReport(btn) {
   }
 }
 
+// ---------- barra superior: vista ampliada, sonido, ajustes ----------
+const $expand = document.getElementById('expand');
+$expand.addEventListener('click', () => {
+  const on = document.body.classList.toggle('is-expanded');
+  $expand.setAttribute('aria-pressed', String(on));
+  sfx.click();
+  setTimeout(() => stage.resize(), 320);
+});
+
+const $mute = document.getElementById('mute');
+function syncMute() {
+  $mute.setAttribute('aria-pressed', String(!prefs.sound));
+  $mute.setAttribute('aria-label', prefs.sound ? 'Silenciar' : 'Activar sonido');
+}
+$mute.addEventListener('click', () => {
+  prefs.sound = !prefs.sound;
+  setSound(prefs.sound);
+  syncMute();
+  savePrefs();
+  sfx.click();
+});
+syncMute();
+
+const $quality = document.getElementById('quality-options');
+function renderQuality() {
+  const detected = QUALITY[detectQuality()].label.toLowerCase();
+  const opts = [{ id: 'auto', name: `Automática (${detected})` }, ...Object.entries(QUALITY).map(([id, q]) => ({ id, name: q.label }))];
+  $quality.innerHTML = opts.map((o) => `<label class="chip"><input type="radio" name="quality" value="${o.id}" ${prefs.quality === o.id ? 'checked' : ''} /><span>${o.name}</span></label>`).join('');
+  document.getElementById('quality-hint').textContent = 'Baja: sin sombras, texturas ligeras y 30 FPS, ideal para teléfonos sencillos y ahorrar batería.';
+}
+$quality.addEventListener('change', (e) => {
+  prefs.quality = e.target.value;
+  stage.setQuality(resolveQuality(prefs.quality));
+  savePrefs();
+});
+renderQuality();
+setupInstall(document.getElementById('install'), document.getElementById('install-hint'));
+
+// ---------- persistencia ----------
+function readJSON(key) {
+  try { return JSON.parse(localStorage.getItem(key)) ?? {}; } catch { return {}; }
+}
+function savePrefs() {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* modo privado */ }
+}
 function persist() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* modo privado */ }
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* sin espacio o modo privado */ }
 }
 function restore() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (!saved || typeof saved !== 'object') return null;
-    const base = defaultState();
-    return { ...base, ...saved, ship: { ...base.ship, ...saved.ship }, look: { ...base.look, ...saved.look } };
-  } catch {
-    return null;
-  }
+  const saved = readJSON(STORAGE_KEY);
+  if (!saved.ship) return null;
+  const base = defaultState();
+  return {
+    ...base,
+    ...saved,
+    ship: { ...base.ship, ...saved.ship },
+    look: { ...base.look, ...saved.look, insignia: { ...base.look.insignia, ...saved.look?.insignia } },
+  };
 }
 
 // ---------- arranque y datos NASA ----------
@@ -296,6 +443,7 @@ async function boot() {
   render();
   sceneFor(phase);
   enter();
+  if (state.look.insignia.upload) preloadLogo(state.look.insignia.upload).then(() => { lastShipKey = ''; syncScene(); });
   const [weather, neos, apod] = await Promise.all([loadSpaceWeather(), loadNeos(), loadApod()]);
   Object.assign(nasa, {
     flares: weather.flares,

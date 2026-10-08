@@ -27,10 +27,14 @@ export function defaultState() {
       { name: DEFAULT_NAMES[2], role: 'ingeniero' },
       { name: DEFAULT_NAMES[3], role: 'cientifico' },
     ],
-    look: { suit: 'emu', suitColor: 'original', agency: 'NASA', patch: 'ARTEMIS' },
+    look: {
+      suit: 'emu', suitColor: 'original', agency: 'NASA', patch: 'ARTEMIS',
+      insignia: { shape: 'circulo', symbol: 'cohete', bg: '#14182a', upload: null },
+    },
     ship: {
       capsule: 'orion', habitat: 'none', engine: 'aj10', tanks: 'm', power: 'xwing',
       life: 'open', shield: 'avcoat', docking: 'idss', legs: 'none', paint: 'white', accent: 'orange',
+      livery: 'bandas', finish: 'satinado', mli: 'oro', name: 'Esperanza',
     },
     instruments: ['cam', 'rad'],
     propLoad: 9000,
@@ -334,18 +338,19 @@ export function simulate(state, ev, flares = []) {
   const flareEvents = flares.filter((f) => /^[XM]/i.test(f.classType || '')).slice(0, 3);
   let flareIdx = 0;
 
-  for (const s of ev.route.steps) {
+  // Cada etapa devuelve el desenlace si la misión termina ahí (o null para seguir).
+  const runStep = (s) => {
     const day = `Día ${fmt(s.day)}`;
     if (s.type === 'launch') {
       const launches = state.launches + (ev.crewLaunch ? 1 : 0);
       for (let i = 0; i < launches; i++) {
         if (rng() > ev.lv.reliability + reliabilityBonus) {
           log.push({ t: 'T-0', kind: 'fail', scene: 'launch', text: `Falla del ${i === launches - 1 && ev.crewLaunch ? 'Falcon 9 de la tripulación' : ev.lv.name}. El sistema de escape salva a la tripulación, pero la misión se cancela.` });
-          return finish('abort');
+          return 'abort';
         }
       }
       log.push({ t: 'T-0', kind: 'ok', scene: 'launch', text: `${s.name}: ${state.launches > 1 ? `${state.launches} lanzamientos y ensamblaje en órbita. ` : ''}${fmt(ev.wetMass)} kg en camino.${ev.crewLaunch ? ' La tripulación llega aparte en Falcon 9 y se acopla.' : ''}` });
-      continue;
+      return null;
     }
     if (s.type === 'dock') {
       const r = s.refill;
@@ -356,28 +361,28 @@ export function simulate(state, ev, flares = []) {
         t: day, kind: 'ok', scene: 'dock', station: s.station,
         text: `${s.name}. ${state.crew[0].name} cruza la escotilla y carga ${what.length ? what.join(' y ') : 'nada: no hay stock compatible'}${r.cost ? ` (US$ ${fmt(r.cost)} M)` : ''}.${r.incompatible && ev.propType ? ` La estación no tiene ${PROPELLANTS[ev.propType].name.toLowerCase()}.` : ''}`,
       });
-      continue;
+      return null;
     }
     if (s.type === 'burn') {
       if (ev.route.failure?.reason === 'prop' && ev.route.failure.step.name === s.name) {
         const short = fmt(ev.route.failure.short);
         if (!departed) {
           log.push({ t: day, kind: 'fail', scene: 'burn', text: `${s.name}: el propelente no alcanza (faltan ${short} kg). Se aborta en órbita baja y la tripulación vuelve a casa.` });
-          return finish('abort');
+          return 'abort';
         }
         if (!reached && ev.dest.id === 'moon') {
           log.push({ t: day, kind: 'fail', scene: 'burn', text: `${s.name}: sin propelente para frenar (faltan ${short} kg). Como el Apolo 13, la trayectoria de retorno libre rodea la Luna y trae a la tripulación de vuelta.` });
-          return finish('freereturn');
+          return 'freereturn';
         }
         log.push({ t: day, kind: 'fail', scene: 'burn', text: `${s.name}: el propelente se agota (faltan ${short} kg). La nave queda varada lejos de la Tierra.` });
-        return finish('stranded');
+        return 'stranded';
       }
       if (s.dv > 0.3 && rng() < engineFail) {
         if (canRepair) {
           log.push({ t: day, kind: 'warn', scene: 'burn', text: `${s.name}: el motor se apaga antes de tiempo. ${roles.has('ingeniero') ? 'Ingeniería de vuelo' : 'El brazo robótico'} permite repararlo y repetir el encendido.` });
         } else {
           log.push({ t: day, kind: 'fail', scene: 'burn', text: `${s.name}: falla del motor sin forma de repararlo.` });
-          return finish(departed ? 'stranded' : 'abort');
+          return departed ? 'stranded' : 'abort';
         }
       } else {
         log.push({
@@ -394,28 +399,37 @@ export function simulate(state, ev, flares = []) {
         const date = (f.peakTime || f.beginTime || '').slice(0, 10);
         log.push({ t: `Días ${fmt(s.day - s.days)}–${fmt(s.day)}`, kind: 'warn', source: 'DONKI', scene: 'burn', text: `Fulguración ${f.classType} (como la registrada por la NASA el ${date}): la tripulación se refugia junto a los tanques de agua durante la tormenta de partículas.` });
       }
-      continue;
+      return null;
     }
     if (s.type === 'stay') {
       reached = true;
       if (ev.route.failure?.reason === 'cons' && ev.route.failure.step.name === s.name) {
         log.push({ t: day, kind: 'fail', scene: 'stay', text: `${s.name}: se acaban los víveres. Regreso de emergencia.` });
-        return finish('cons');
+        return 'cons';
       }
       log.push({ t: day, kind: 'ok', scene: s.region === 'surface' ? 'land' : 'stay', text: `${s.name} durante ${fmt(s.days)} días.` });
-      continue;
+      return null;
     }
     if (s.type === 'reentry') {
       if (ev.route.failure?.reason === 'cons') {
         log.push({ t: day, kind: 'fail', scene: 'reentry', text: 'Los víveres se agotaron antes de volver. La tripulación no sobrevive.' });
-        return finish('cons');
+        return 'cons';
       }
       if (ev.ship.shield.maxEntry < s.speed) {
         log.push({ t: day, kind: 'fail', scene: 'reentry', text: `Reentrada a ${s.speed.toFixed(1)} km/s: el escudo (${ev.ship.shield.maxEntry || 0} km/s) no resiste.` });
-        return finish('reentry');
+        return 'reentry';
       }
       log.push({ t: day, kind: 'ok', scene: 'reentry', text: `Reentrada a ${s.speed.toFixed(1)} km/s y amerizaje. ¡Bienvenidos a casa!` });
     }
+    return null;
+  };
+
+  for (const s of ev.route.steps) {
+    const from = log.length;
+    const outcome = runStep(s);
+    // telemetría para la interfaz: día, propelente y víveres tras la etapa
+    for (let i = from; i < log.length; i++) log[i].tele ??= { day: s.day, prop: s.after.prop, cons: s.after.cons };
+    if (outcome) return finish(outcome);
   }
   return finish('ok');
 
@@ -448,8 +462,9 @@ export function newCrewMember(state) {
   return { name, role };
 }
 
-export const paintHex = (id) => (PAINTS.find((p) => p.id === id) ?? PAINTS[0]).hex;
-export const accentHex = (id) => (ACCENTS.find((p) => p.id === id) ?? ACCENTS[0]).hex;
+// Los colores pueden ser un id de la paleta o un hex personalizado (#rrggbb)
+export const paintHex = (id) => (/^#[0-9a-f]{6}$/i.test(id) ? id : (PAINTS.find((p) => p.id === id) ?? PAINTS[0]).hex);
+export const accentHex = (id) => (/^#[0-9a-f]{6}$/i.test(id) ? id : (ACCENTS.find((p) => p.id === id) ?? ACCENTS[0]).hex);
 
 export const fmt = (n) => Math.round(n).toLocaleString('es');
 

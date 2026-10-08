@@ -11,7 +11,7 @@ provisiones y vuelas la misión. Cada decisión se valida con física y **datos 
 |---|---|---|
 | 01 Misión | Destino (ISS, Luna con o sin alunizaje, Marte, asteroide real), programa | Clima espacial de los últimos 30 días (DONKI) |
 | 02 Tripulación | Creas tu personaje: nombre, agencia, parche, traje real de la NASA (EMU, Z-2, ACES, Mark III, Gemini, Mercury), color; añades tripulantes con rol | Asientos de la cápsula; cada rol da una ventaja |
-| 03 Hangar | Cápsula, hábitat, motor, tanques, energía, soporte vital, escudo térmico, acoplamiento, tren de aterrizaje, ciencia y pintura | Masa, volumen habitable, potencia a la distancia del Sol |
+| 03 Hangar | Cápsula, hábitat, motor, tanques, energía, soporte vital, escudo térmico, acoplamiento, tren de aterrizaje, ciencia, pintura e insignia | Masa, volumen habitable, potencia a la distancia del Sol |
 | 04 Ruta | Cohete, nº de lanzamientos, inyección directa, propelente al despegar y escalas en estaciones | Tsiolkovsky etapa por etapa, víveres día a día, evaporación criogénica, repostajes |
 | 05 Revisión | — | 13 chequeos tipo PDR con el «por qué» de cada uno |
 | 06 Vuelo | — | Simulación con acoplamientos en 3D, tormentas solares reales, reentrada y nota (S–F) |
@@ -23,6 +23,29 @@ provisiones y vuelas la misión. Cada decisión se valida con física y **datos 
 
 Las estaciones solo venden ciertos propelentes: si eliges un Raptor (metano) no puedes repostar en Gateway.
 Ejemplo real del juego: la Orion por defecto **no puede volver de la Luna sin repostar en Gateway**.
+
+### Personalización
+- **Pintura**: casco y acento (paleta o color libre), librea (liso, bandas, ajedrez del Saturno V, bicolor, franjas), acabado (satinado, mate, metalizado) y aislamiento MLI (dorado, plata, negro).
+- **Nombre de la nave** pintado en los tanques y el hábitat.
+- **Insignia de la misión**: forma, símbolo, fondo, texto, una estrella por tripulante… o **sube tu propio logo**. Se pinta en la cápsula y los tanques.
+- Luces de navegación (roja a babor, verde a estribor, estroboscópicas) y llama del motor en la cuenta regresiva.
+
+### Inmersión
+Cuenta regresiva con encendido del motor y vibración de cámara, sonidos sintetizados (sin archivos), escenas de acoplamiento con los modelos reales de la ISS y el Gateway, y telemetría en vivo durante el vuelo (día, propelente, víveres, dosis).
+
+## Móvil, PC e instalación como app
+- **Responsive**: en PC la hoja de papel va a la derecha; en el teléfono vertical la vista 3D queda arriba, el panel tiene su propio scroll y los presupuestos van abajo (al alcance del pulgar); en horizontal se divide 3D | panel. El botón ⤢ amplía la vista 3D.
+- **Calidad gráfica** (⚙): *Automática* elige según el dispositivo; *Baja* desactiva sombras, usa texturas de 2048 px y limita a 30 FPS para teléfonos sencillos.
+- **Sin conexión**: un service worker guarda la app, los modelos y las texturas después de la primera visita.
+
+### Instalar en el celular (PWA)
+Abre el sitio en Chrome (Android) o Safari (iPhone) → menú → **Agregar a la pantalla de inicio**. En Android también aparece el botón **Instalar como app** en ⚙.
+
+### Generar un APK para Android
+1. Despliega en Vercel (necesitas la URL pública con HTTPS).
+2. Entra a **https://www.pwabuilder.com**, pega la URL y pulsa *Start*.
+3. *Package for stores* → **Android** → *Generate*. Descarga el ZIP: trae el `.apk` (para instalar directo) y el `.aab` (para Google Play).
+4. Para que se abra a pantalla completa sin barra del navegador, copia el `assetlinks.json` que viene en el ZIP a `public/.well-known/assetlinks.json`, haz commit y vuelve a desplegar.
 
 ## Datos NASA usados para validar
 - **DONKI (FLR, CME)** → índice de actividad solar → dosis de radiación (límite de carrera NASA de 600 mSv) y tormentas durante el vuelo.
@@ -50,7 +73,9 @@ npm run build
 ## Estructura
 ```
 api/nasa.js              Proxy seguro a api.nasa.gov (Vercel Function)
-src/main.js              Arranque, estado, fases, vuelo
+src/main.js              Arranque, estado, fases, vuelo, ajustes
+src/app/                 Calidad gráfica, sonido, insignia (canvas) e instalación PWA
+src/ui/                  Una plantilla por fase (mission, crew, hangar, route, review, flight)
 src/mission.js           Ruta etapa por etapa, provisiones, validaciones y simulación
 src/physics.js           Tsiolkovsky, Hohmann, encuentro con NEO, potencia solar
 src/data/                Piezas (parts.js), trajes y roles (crew.js), destinos, cohetes y estaciones
@@ -58,7 +83,8 @@ src/scene/bodies.js      Tierra realista (día, luces nocturnas, nubes, océanos
 src/scene/ship.js        Nave modular procedural
 src/scene/models.js      Modelos NASA (trajes, ISS, Gateway) con Draco
 src/scene/stage.js       Hangar orbital, creación de personaje, mapa y acoplamientos
-public/models, textures  Recursos 3D y mapas
+public/models, textures  Recursos 3D y mapas (texturas de 4096 y 2048 px)
+public/sw.js, manifest   App instalable y caché sin conexión
 ```
 
 ## Créditos de recursos

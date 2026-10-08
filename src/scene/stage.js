@@ -11,6 +11,7 @@ import { buildShip } from './ship.js';
 import { createEarth, createMoon, createMars, glowSprite, starfield } from './bodies.js';
 import { loadNormalized, loadStation, tintSuit, preload } from './models.js';
 import { orbitPoint } from '../physics.js';
+import { QUALITY } from '../app/quality.js';
 
 const AU = 10;
 const MOON_DIST = 30;
@@ -18,9 +19,14 @@ const EARTH_R = 3000; // Tierra del telón de fondo (escala de escena, no real)
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const SUN_DIR = new THREE.Vector3(0.8, 0.45, 0.5).normalize();
 
-export function createStage(container) {
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+export function createStage(container, { quality = 'media', onProgress } = {}) {
+  let q = QUALITY[quality];
+  // Progreso de carga de texturas y modelos (pantalla de carga)
+  THREE.DefaultLoadingManager.onProgress = (_url, loaded, total) => onProgress?.(loaded / total);
+  THREE.DefaultLoadingManager.onLoad = () => onProgress?.(1);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: q.antialias, powerPreference: quality === 'baja' ? 'low-power' : 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatio));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
@@ -46,15 +52,15 @@ export function createStage(container) {
 
   const sun = new THREE.DirectionalLight(0xfff3e2, 3.4);
   sun.position.copy(SUN_DIR).multiplyScalar(200);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.castShadow = q.shadows > 0;
+  sun.shadow.mapSize.set(q.shadows || 512, q.shadows || 512);
   const sc = sun.shadow.camera;
   sc.left = sc.bottom = -40; sc.right = sc.top = 40; sc.near = 1; sc.far = 600;
   scene.add(sun, sun.target);
   const fill = new THREE.HemisphereLight(0x6d8fcf, 0x0c0a08, 0.4); // luz azulada reflejada por la Tierra
   scene.add(fill);
 
-  const stars = starfield();
+  let stars = starfield(q.stars);
   scene.add(stars);
 
   // ---------- Telón: la Tierra real bajo la órbita ----------
@@ -62,7 +68,7 @@ export function createStage(container) {
   const earthPivot = new THREE.Group();
   earthPivot.position.set(0, -EARTH_R - 420, -600);
   earthPivot.rotation.set(Math.PI / 2 - 0.45, 0, 0.25);
-  const bigEarth = createEarth(EARTH_R, 160);
+  const bigEarth = createEarth(EARTH_R, q.segments, q.textures);
   bigEarth.rotation.y = 1.9; // empieza sobre América
   bigEarth.userData.setSun(SUN_DIR);
   earthPivot.add(bigEarth);
@@ -83,7 +89,7 @@ export function createStage(container) {
   let crewToken = 0;
   let mode = 'hangar';
 
-  preload(['emu', 'iss-lite', 'gateway']);
+  preload(['emu', 'iss-lite']);
 
   // ---------- Hangar ----------
   function setShip(ev, look) {
@@ -126,7 +132,7 @@ export function createStage(container) {
       if (i > 0) m.scale.multiplyScalar(0.96);
       crew.add(m);
       const el = document.createElement('div');
-      el.className = i === 0 ? 'scene-label is-target' : 'scene-label';
+      el.className = i === 0 ? 'scene-label crew-label is-target' : 'scene-label crew-label';
       el.textContent = members[i].name;
       const l = new CSS2DObject(el);
       l.position.set(0, suit.height + 0.35, 0);
@@ -141,6 +147,7 @@ export function createStage(container) {
 
   // ---------- Mapa ----------
   function showMap(ev, opts = {}) {
+    if (ev.state.stops.includes('gateway')) preload(['gateway']);
     clearGroup(map);
     mapAnim = ev.dest.frame === 'sun' ? heliocentric(ev) : geocentric(ev);
     mapAnim.t = opts.progress ?? 1;
@@ -155,7 +162,7 @@ export function createStage(container) {
   }
 
   function geocentric(ev) {
-    const earth = createEarth(1, 96);
+    const earth = createEarth(1, Math.min(96, q.segments), q.textures);
     earth.userData.setSun(SUN_DIR);
     earth.rotation.x = 0.41;
     map.add(earth);
@@ -238,7 +245,7 @@ export function createStage(container) {
     const sunLight = new THREE.PointLight(0xfff0dd, 600, 0, 1.4);
     map.add(sunLight);
 
-    const earth = createEarth(0.35, 64);
+    const earth = createEarth(0.35, 48, 2048);
     earth.position.copy(start);
     earth.userData.setSun(start.clone().negate());
     map.add(earth);
@@ -332,7 +339,7 @@ export function createStage(container) {
     map.visible = next === 'map';
     dock.visible = next === 'dock';
     backdrop.visible = next !== 'map';
-    sun.castShadow = next === 'hangar' || next === 'crew' || next === 'dock';
+    sun.castShadow = q.shadows > 0 && (next === 'hangar' || next === 'crew' || next === 'dock');
     camera.near = next === 'map' ? 0.01 : 0.3;
     camera.far = next === 'map' ? 4000 : 20000;
     camera.updateProjectionMatrix();
@@ -371,22 +378,70 @@ export function createStage(container) {
 
   function resize() {
     const w = container.clientWidth, h = container.clientHeight;
+    if (!w || !h) return;
     renderer.setSize(w, h);
     labels.setSize(w, h);
     camera.aspect = w / h;
-    const sheet = document.getElementById('sheet');
-    const covered = w > 820 && sheet ? sheet.offsetWidth + 16 : 0;
-    if (covered) camera.setViewOffset(w + covered, h, covered, 0, w, h);
+    // Si la hoja de papel tapa parte del lienzo, desplazamos el centro óptico al área libre
+    const sheet = document.getElementById('sheet')?.getBoundingClientRect();
+    const box = container.getBoundingClientRect();
+    const covered = sheet && sheet.top < box.top + h * 0.5 && sheet.bottom > box.top + h * 0.5
+      ? Math.max(0, Math.min(w * 0.6, box.right - sheet.left + 16)) : 0;
+    if (covered > 40) camera.setViewOffset(w + covered, h, covered, 0, w, h);
     else camera.clearViewOffset();
     camera.updateProjectionMatrix();
   }
   new ResizeObserver(resize).observe(container);
+  window.addEventListener('resize', resize);
   resize();
 
+  function setQuality(level) {
+    q = QUALITY[level] ?? q;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatio));
+    renderer.shadowMap.enabled = q.shadows > 0;
+    if (q.shadows) {
+      sun.shadow.mapSize.set(q.shadows, q.shadows);
+      sun.shadow.map?.dispose();
+      sun.shadow.map = null;
+    }
+    sun.castShadow = q.shadows > 0 && mode !== 'map';
+    scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
+    bigEarth.userData.setTextureSize(q.textures);
+    scene.remove(stars);
+    stars.geometry.dispose();
+    stars = starfield(q.stars);
+    scene.add(stars);
+    resize();
+  }
+
+  // Encendido del motor (cuenta regresiva del lanzamiento)
+  let ignition = 0;
+  function ignite(on) {
+    ignition = on ? 0.001 : 0;
+    ship?.traverse((o) => { if (o.name === 'plume') o.visible = on; });
+  }
+
   const timer = new THREE.Timer();
-  renderer.setAnimationLoop(() => {
+  let last = 0;
+  renderer.setAnimationLoop((now) => {
+    if (q.fps < 60 && now - last < 1000 / q.fps - 2) return; // tope de FPS en calidad baja
+    last = now;
     timer.update();
     const dt = Math.min(Math.max(timer.getDelta(), 0), 0.05);
+    const t = timer.getElapsed();
+    // Luces de navegación parpadeando y llama del motor
+    if (ship) {
+      ship.traverse((o) => {
+        if (o.userData.blink) o.visible = (t + o.userData.blink) % 1.4 < 0.12;
+        if (o.name === 'plume' && o.visible) o.scale.set(1, 0.85 + Math.random() * 0.3, 1);
+      });
+    }
+    if (ignition) {
+      ignition += dt;
+      const shake = Math.min(1, ignition / 2) * 0.06;
+      camera.position.x += (Math.random() - 0.5) * shake;
+      camera.position.y += (Math.random() - 0.5) * shake;
+    }
     if (flying) {
       const k = 1 - Math.pow(0.002, dt);
       camera.position.lerp(camTarget.pos, k);
@@ -406,7 +461,7 @@ export function createStage(container) {
     labels.render(scene, camera);
   });
 
-  return { setShip, focusSlot, setCrew, setMode, showMap, setProgress, showDock, scene, camera, get mode() { return mode; } };
+  return { setShip, focusSlot, setCrew, setMode, showMap, setProgress, showDock, setQuality, ignite, resize, scene, camera, get mode() { return mode; } };
 }
 
 // ---------- utilidades ----------

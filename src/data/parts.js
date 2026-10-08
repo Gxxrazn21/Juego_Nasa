@@ -21,6 +21,7 @@ export const SLOTS = [
   { id: 'legs', name: 'Aterrizaje' },
   { id: 'science', name: 'Ciencia' },
   { id: 'paint', name: 'Pintura' },
+  { id: 'insignia', name: 'Insignia' },
 ];
 
 export const PARTS = {
@@ -82,6 +83,26 @@ export const PAINTS = [
   { id: 'carbon', name: 'Carbono', hex: '#2b2d33' },
   { id: 'foam', name: 'Espuma aislante', hex: '#c8692c' },
   { id: 'navy', name: 'Azul profundo', hex: '#2c3e66' },
+];
+
+export const LIVERIES = [
+  { id: 'liso', name: 'Liso' },
+  { id: 'bandas', name: 'Bandas' },
+  { id: 'ajedrez', name: 'Ajedrez Saturno V' },
+  { id: 'bicolor', name: 'Bicolor' },
+  { id: 'carreras', name: 'Franjas' },
+];
+
+export const FINISH_LIST = [
+  { id: 'satinado', name: 'Satinado' },
+  { id: 'mate', name: 'Mate' },
+  { id: 'metalico', name: 'Metalizado' },
+];
+
+export const MLI_LIST = [
+  { id: 'oro', name: 'Kapton dorado', hex: '#d9a441' },
+  { id: 'plata', name: 'Aluminizado plata', hex: '#c9ccd2' },
+  { id: 'negro', name: 'Kapton negro', hex: '#1d1d22' },
 ];
 
 export const ACCENTS = [
