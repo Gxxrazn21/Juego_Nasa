@@ -385,8 +385,11 @@ export function createStage(container, { quality = 'media', onProgress, onContex
     const from = new THREE.Vector3(2.4, portY - 2.5, 1.8);
     const to = new THREE.Vector3(5.5, portY + 3, 3.5);
     Object.assign(dockAnim, { craft, dockedY, astro, from, to, start: performance.now() });
+    // estaciones más grandes (la ISS mide 109 m) → cámara más lejos
+    const span = new THREE.Box3().setFromObject(station).getSize(new THREE.Vector3());
+    const far = THREE.MathUtils.clamp(Math.max(span.x, span.z) / 70, 1, 1.7);
     const look2 = new THREE.Vector3(2, portY - s.height * 0.35, 0);
-    goTo(look2.clone().add(new THREE.Vector3(26, 7, 38)), look2, true);
+    goTo(look2.clone().add(new THREE.Vector3(26, 9, 38).multiplyScalar(far)), look2, true);
   }
 
   function updateDock() {
@@ -609,17 +612,22 @@ function asteroid(radius) {
   geo.computeVertexNormals();
   return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x8a8178, roughness: 1, flatShading: true }));
 }
-/** Parte inferior de los módulos centrales de una estación (ignora paneles y armazones lejanos). */
+/**
+ * Parte inferior de los módulos centrales de una estación: se miden los vértices cercanos
+ * al eje vertical (así se ignoran paneles solares y armazones, aunque el modelo sea una sola malla).
+ */
 function centralBottom(station) {
   station.updateMatrixWorld(true);
-  const b = new THREE.Box3();
-  const c = new THREE.Vector3();
+  const v = new THREE.Vector3();
   let min = Infinity;
   station.traverse((o) => {
     if (!o.isMesh) return;
-    b.setFromObject(o);
-    b.getCenter(c);
-    if (Math.abs(c.x) < 6 && Math.abs(c.z) < 6) min = Math.min(min, b.min.y);
+    const pos = o.geometry.attributes.position;
+    const step = Math.max(1, Math.floor(pos.count / 40000));
+    for (let i = 0; i < pos.count; i += step) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+      if (Math.abs(v.x) < 4 && Math.abs(v.z) < 4 && v.y < min) min = v.y;
+    }
   });
   return Number.isFinite(min) ? min : new THREE.Box3().setFromObject(station).min.y;
 }

@@ -817,3 +817,18 @@ body.is-expanded .hud-actions, body.is-expanded .settings { right: var(--space-m
 @media (max-width: 420px) {
   .preset { grid-template-columns: 1fr; }
 }
+.station-views { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); margin: 0 0 var(--space-sm); font-size: var(--text-sm); color: var(--ink-2); }
+.chip-btn {
+  padding: 6px 14px;
+  min-height: 2.25rem;
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  background: transparent;
+  font-weight: 700;
+  font-size: var(--text-sm);
+  color: var(--ink);
+  cursor: pointer;
+}
+.chip-btn:hover { background: var(--paper-2); }
+.chip-btn[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: oklch(0.18 0.03 40); }
+@media (pointer: coarse) { .chip-btn { min-height: 2.75rem; } }

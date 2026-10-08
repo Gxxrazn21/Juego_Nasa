@@ -21,6 +21,7 @@ const nasa = { flares: [], cmes: [], neos: [], activity: null, weatherLive: null
 let phase = 'mission';
 let slot = 'presets';
 let presetBackup = null; // diseño anterior, para «Volver a mi diseño»
+let viewingStation = null; // estación que se muestra en 3D desde la fase Ruta
 let flightRun = null; // { result, revealed, done }
 
 const $sheet = document.getElementById('sheet');
@@ -129,7 +130,7 @@ function render({ sheet = true, debounce = false } = {}) {
       summaries: slot === 'presets' ? presetSummaries() : null,
       canUndo: !!presetBackup,
     }); break;
-    case 'route': $sheet.innerHTML = ui.route(state, ev); break;
+    case 'route': $sheet.innerHTML = ui.route(state, ev, viewingStation); break;
     case 'review': $sheet.innerHTML = ui.review(state, ev); break;
     case 'flight': $sheet.innerHTML = ui.flight(state, ev, flightRun.result, flightRun.revealed, flightRun.done); break;
   }
@@ -149,6 +150,7 @@ function sceneFor(p) {
 function goPhase(next) {
   if (next === 'flight' && !flightRun) return;
   phase = next;
+  viewingStation = null;
   if (next !== 'flight') flightRun = null;
   render();
   sceneFor(next);
@@ -215,7 +217,7 @@ async function launchMission() {
       sfx.dock();
       render();
       $sheet.scrollTop = $sheet.scrollHeight;
-      await sleep(5200);
+      await sleep(7000);
       if (flightRun !== run) return;
       stage.setMode('map');
       stage.showMap(ev, { progress: i / n });
@@ -291,6 +293,18 @@ $sheet.addEventListener('click', (e) => {
     sfx.select();
     if (go.dataset.open) slot = go.dataset.open;
     return goPhase(go.dataset.go);
+  }
+  const view = t.closest('[data-view-station]');
+  if (view) {
+    sfx.select();
+    const id = view.dataset.viewStation;
+    viewingStation = id && id !== viewingStation ? id : null;
+    if (viewingStation) {
+      const { suit, colors } = suitLook();
+      stage.setMode('dock');
+      stage.showDock(viewingStation, ev, { ...shipLook(), suit, colors });
+    } else sceneFor(phase);
+    return render();
   }
   const preset = t.closest('[data-preset]');
   if (preset) return applyPreset(preset.dataset.preset);

@@ -1,5 +1,5 @@
 // Service worker de Delta-V: la app y sus recursos 3D quedan en caché para jugar sin conexión.
-const VERSION = 'deltav-v3';
+const VERSION = 'deltav-v4';
 const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/favicon.svg', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {

@@ -1,11 +1,11 @@
 // Fase 04: cohete, propelente y escalas en estaciones.
-import { LAUNCHERS } from '../data/catalog.js';
+import { LAUNCHERS, STATIONS } from '../data/catalog.js';
 import { PROPELLANTS } from '../data/parts.js';
 import { availableStations, directInjection } from '../mission.js';
 import { esc, money, kg, fmt } from './common.js';
 
 // ---------- 04 Ruta ----------
-export function route(state, ev) {
+export function route(state, ev, viewing = null) {
   const direct = directInjection(state);
   const stations = availableStations(state);
   const prop = PROPELLANTS[ev.propType];
@@ -47,6 +47,11 @@ export function route(state, ev) {
   <p class="hint">Tanque de ${kg(ev.tankCapacity)} de ${prop.name.toLowerCase()}${prop.boiloff ? `; se evapora ~${(prop.boiloff * 100).toFixed(2)} % por día` : ''}. Víveres al despegar: ${kg(ev.cons0)} de ${kg(ev.storage)} posibles.</p>
 
   <h3>Estaciones y provisiones</h3>
+  <div class="station-views" role="group" aria-label="Ver estaciones en 3D">
+    <span>Ver en 3D:</span>
+    ${STATIONS.map((st) => `<button type="button" class="chip-btn" data-view-station="${st.id}" ${viewing === st.id ? 'aria-pressed="true"' : ''}>${esc(st.short)}</button>`).join('')}
+    ${viewing ? '<button type="button" class="chip-btn" data-view-station="">Volver al mapa</button>' : ''}
+  </div>
   ${stations.length ? `<div class="options">${stations.map((st) => {
     const sells = st.stock[ev.propType] ?? 0;
     return `<label class="option">
