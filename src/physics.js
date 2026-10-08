@@ -64,28 +64,6 @@ export function solarPower(areaM2, distanceAU, efficiency, degradation = 1) {
   return areaM2 * (SOLAR_CONSTANT / (distanceAU * distanceAU)) * efficiency * degradation;
 }
 
-// Constante calibrada con MRO (antena 3 m, 100 W, ~6 Mbps a 0,7 UA) usando la Red
-// de Espacio Profundo (DSN) de 34 m. Tasa ∝ P·D²/d².
-const LINK_K = 7.35e19;
-export const MAX_RATE_BPS = 150e6;
-
-/** Tasa de bajada aproximada (bit/s). */
-export function downlinkRate(txPowerW, dishM, distanceKm) {
-  const rate = (LINK_K * txPowerW * dishM * dishM) / (distanceKm * distanceKm);
-  return Math.min(rate, MAX_RATE_BPS);
-}
-
-/** Capacidad del lanzador (kg) para un objetivo. Modelo lineal en C3 para escape. */
-export function launcherCapacity(lv, target, c3 = 0) {
-  switch (target) {
-    case 'LEO': return lv.leo;
-    case 'GTO': return lv.gto;
-    case 'TLI': return lv.tli;
-    case 'ESC': return Math.max(0, lv.esc * (1 - c3 / lv.c3max));
-    default: return 0;
-  }
-}
-
 /** Posición heliocéntrica (en UA) de un punto de la órbita para una anomalía verdadera ν. */
 export function orbitPoint({ a, e, i, node = 0, peri = 0 }, nu) {
   const r = (a * (1 - e * e)) / (1 + e * Math.cos(nu));
