@@ -18,6 +18,7 @@ export const SLOTS = [
   { id: 'power', name: 'Energía' },
   { id: 'life', name: 'Soporte vital' },
   { id: 'shield', name: 'Escudo térmico' },
+  { id: 'comms', name: 'Antena' },
   { id: 'docking', name: 'Acoplamiento' },
   { id: 'legs', name: 'Aterrizaje' },
   { id: 'science', name: 'Ciencia' },
@@ -68,6 +69,12 @@ export const PARTS = {
     { id: 'ablative', name: 'Ablativo básico', ref: 'Tipo Soyuz', maxEntry: 8.0, mass: 500, cost: 10 },
     { id: 'avcoat', name: 'Avcoat', ref: 'Apolo y Orion, regreso lunar', maxEntry: 11.5, mass: 1400, cost: 60 },
     { id: 'pica', name: 'PICA-X', ref: 'Dragon; diseñado para velocidades de regreso de Marte', maxEntry: 13.0, mass: 900, cost: 90 },
+  ],
+  comms: [
+    { id: 'sband', name: 'Antenas omnidireccionales (banda S)', ref: 'Voz y telemetría, como las cápsulas en órbita baja', band: 'S', dish: 0.1, tx: 20, mass: 15, power: 60, cost: 5 },
+    { id: 'hgax', name: 'Alta ganancia 1,5 m (banda X)', ref: 'Similar a las de Juno o New Horizons', band: 'X', dish: 1.5, tx: 50, mass: 60, power: 150, cost: 25 },
+    { id: 'hgaka', name: 'Alta ganancia 3 m (banda Ka)', ref: 'Como Mars Reconnaissance Orbiter', band: 'Ka', dish: 3, tx: 100, mass: 140, power: 300, cost: 60 },
+    { id: 'laser', name: 'Terminal láser óptico', ref: 'DSOC (nave Psyche, 2023) y O2O (Artemis II); las nubes lo bloquean ~30 % del tiempo', laser: true, tx: 4, mass: 45, power: 120, cost: 110, availability: 0.7 },
   ],
   docking: [
     { id: 'none', name: 'Sin puerto', ref: 'No podrás visitar estaciones', mass: 0, cost: 0 },

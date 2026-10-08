@@ -1,7 +1,10 @@
 import './styles.css';
 import { createStage } from './scene/stage.js';
-import { defaultState, evaluate, simulate, newCrewMember, paintHex, accentHex, fmt, minimalPropellant, presetState } from './mission.js';
-import { loadSpaceWeather, loadNeos, loadApod, solarActivity } from './nasa.js';
+import { defaultState, evaluate, newCrewMember, paintHex, accentHex, fmt, minimalPropellant, presetState } from './mission.js';
+import { createFlight } from './flight.js';
+import { debrief } from './debrief.js';
+import { CHALLENGES, medalFor, medalRank, matches } from './data/challenges.js';
+import { loadSpaceWeather, loadNeos, loadApod, loadEpic, solarActivity } from './nasa.js';
 import { SUITS, ROLES, SUIT_COLORS } from './data/crew.js';
 import { PARTS } from './data/parts.js';
 import { PRESETS } from './data/presets.js';
@@ -14,15 +17,17 @@ import * as ui from './ui/index.js';
 
 const STORAGE_KEY = 'deltav.crewed.v1';
 const PREFS_KEY = 'deltav.prefs.v1';
+const MEDALS_KEY = 'deltav.medals.v1';
 
 const state = restore() ?? defaultState();
 const prefs = { quality: 'auto', sound: true, ...readJSON(PREFS_KEY) };
-const nasa = { flares: [], cmes: [], neos: [], activity: null, weatherLive: null, neosLive: null, apod: null };
+const medals = readJSON(MEDALS_KEY); // { idReto: 'bronce' | 'plata' | 'oro' }
+const nasa = { flares: [], cmes: [], seps: [], gsts: [], neos: [], activity: null, weatherLive: null, neosLive: null, apod: null, epic: null };
 let phase = 'mission';
 let slot = 'presets';
 let presetBackup = null; // diseño anterior, para «Volver a mi diseño»
 let viewingStation = null; // estación que se muestra en 3D desde la fase Ruta
-let flightRun = null; // { result, revealed, done }
+let flightRun = null; // { log, decision, choose, result, done, debrief, challenge }
 
 const $sheet = document.getElementById('sheet');
 const $phases = document.getElementById('phases');
@@ -124,7 +129,7 @@ function render({ sheet = true, debounce = false } = {}) {
   if (!sheet) return;
   const scroll = $sheet.scrollTop;
   switch (phase) {
-    case 'mission': $sheet.innerHTML = ui.mission(state, ev, nasa); break;
+    case 'mission': $sheet.innerHTML = ui.mission(state, ev, nasa, medals); break;
     case 'crew': $sheet.innerHTML = ui.crew(state, ev); break;
     case 'hangar': $sheet.innerHTML = ui.hangar(state, ev, slot, slot === 'insignia' ? ui.insigniaPreview(shipLook().insignia) : null, {
       summaries: slot === 'presets' ? presetSummaries() : null,
@@ -132,7 +137,7 @@ function render({ sheet = true, debounce = false } = {}) {
     }); break;
     case 'route': $sheet.innerHTML = ui.route(state, ev, viewingStation); break;
     case 'review': $sheet.innerHTML = ui.review(state, ev); break;
-    case 'flight': $sheet.innerHTML = ui.flight(state, ev, flightRun.result, flightRun.revealed, flightRun.done); break;
+    case 'flight': $sheet.innerHTML = ui.flight(state, ev, flightRun); break;
   }
   $sheet.scrollTop = scroll;
   persist();
@@ -151,7 +156,7 @@ function goPhase(next) {
   if (next === 'flight' && !flightRun) return;
   phase = next;
   viewingStation = null;
-  if (next !== 'flight') flightRun = null;
+  if (next !== 'flight') stopFlight();
   render();
   sceneFor(next);
   enter();
@@ -191,11 +196,22 @@ async function countdown() {
   $countdown.hidden = true;
 }
 
+/** Detiene el vuelo en curso (también si esperaba una decisión). */
+function stopFlight() {
+  const run = flightRun;
+  flightRun = null;
+  run?.choose?.();
+}
+
+const scrollEnd = () => { $sheet.scrollTop = $sheet.scrollHeight; };
+
 async function launchMission() {
   ev = evaluate(state, nasa);
   if (!ev.canLaunch) return;
-  const result = simulate(state, ev, nasa.flares);
-  const run = { result, revealed: 0, done: false };
+  stopFlight();
+  const flightEv = ev;
+  const gen = createFlight(state, flightEv, nasa).run();
+  const run = { log: [], decision: null, choose: null, result: null, done: false, debrief: null, challenge: null };
   flightRun = run;
   phase = 'flight';
   render();
@@ -203,37 +219,88 @@ async function launchMission() {
   await countdown();
   if (flightRun !== run) return;
   stage.setMode('map');
-  stage.showMap(ev, { progress: 0 });
-  const n = result.log.length;
-  for (let i = 0; i < n; i++) {
-    if (flightRun !== run) return;
-    const entry = result.log[i];
-    run.revealed = i + 1;
+  stage.showMap(flightEv, { progress: 0 });
+
+  let answer;
+  for (;;) {
+    const step = gen.next(answer);
+    answer = undefined;
+    if (step.done) { run.result = step.value; break; }
+    const entry = step.value;
+
+    // Decisión: el vuelo espera a que el jugador elija
+    if (entry.decision) {
+      run.decision = entry.decision;
+      sfx.alarm();
+      render();
+      const card = $sheet.querySelector('.decision');
+      card?.scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' });
+      card?.querySelector('.choice:not([disabled])')?.focus({ preventScroll: true });
+      answer = await new Promise((resolve) => { run.choose = resolve; });
+      run.decision = null;
+      run.choose = null;
+      if (flightRun !== run) return;
+      continue;
+    }
+
+    run.log.push(entry);
     if (entry.kind === 'fail') sfx.alarm();
     if (entry.scene === 'dock') {
       const { suit, colors } = suitLook();
       stage.setMode('dock');
-      stage.showDock(entry.station, ev, { ...shipLook(), suit, colors });
+      stage.showDock(entry.station, flightEv, { ...shipLook(), suit, colors });
       sfx.dock();
       render();
-      $sheet.scrollTop = $sheet.scrollHeight;
-      await sleep(7000);
+      scrollEnd();
+      await sleep(reduceMotion ? 2500 : 7000);
       if (flightRun !== run) return;
       stage.setMode('map');
-      stage.showMap(ev, { progress: i / n });
+      stage.showMap(flightEv, { progress: entry.tele.progress });
     } else {
       if (entry.scene === 'burn' || entry.scene === 'land') sfx.burn();
-      stage.setProgress((i + 1) / n);
+      stage.setProgress(entry.tele.progress);
       render();
-      $sheet.scrollTop = $sheet.scrollHeight;
+      scrollEnd();
       await sleep(1500);
     }
+    if (flightRun !== run) return;
   }
-  if (flightRun !== run) return;
+
+  const r = run.result;
+  run.log = r.log;
+  run.debrief = debrief(state, flightEv, r, nasa);
+  run.challenge = challengeResult(r, flightEv);
   run.done = true;
-  if (result.ok) sfx.success();
+  if (r.ok) sfx.success();
   render();
-  $sheet.scrollTop = $sheet.scrollHeight;
+  $sheet.querySelector('.result')?.scrollIntoView({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' });
+}
+
+/** Medalla del reto activo; guarda la mejor de cada reto. */
+function challengeResult(r, e) {
+  const c = CHALLENGES.find((x) => x.id === state.challenge);
+  if (!c) return null;
+  const medal = medalFor(c, r, e);
+  const isNew = !!medal && medalRank(medal) > medalRank(medals[c.id]);
+  if (isNew) {
+    medals[c.id] = medal;
+    try { localStorage.setItem(MEDALS_KEY, JSON.stringify(medals)); } catch { /* modo privado */ }
+  }
+  return { c, medal, isNew, mismatch: !matches(c, e) };
+}
+
+/** Empieza un reto: fija destino y programa, y conserva tu nave. */
+function startChallenge(id) {
+  const c = CHALLENGES.find((x) => x.id === id);
+  state.challenge = c?.id ?? null;
+  if (c) {
+    Object.assign(state, { land: false }, structuredClone(c.setup));
+    if (state.destination === 'iss') state.stops = [];
+    ensureNeo();
+  }
+  sfx.select();
+  render();
+  if (phase === 'mission' || phase === 'route') stage.showMap(ev);
 }
 
 // ---------- naves de fábrica ----------
@@ -310,6 +377,13 @@ $sheet.addEventListener('click', (e) => {
   if (preset) return applyPreset(preset.dataset.preset);
   if (t.closest('[data-undo-preset]')) return undoPreset();
   if (t.closest('[data-launch]')) return launchMission();
+  const choice = t.closest('[data-choice]');
+  if (choice) {
+    if (!choice.disabled && flightRun?.choose) { sfx.select(); flightRun.choose(choice.dataset.choice); }
+    return;
+  }
+  const challenge = t.closest('[data-challenge]');
+  if (challenge) return startChallenge(challenge.dataset.challenge);
   const tab = t.closest('[data-slot]');
   if (tab) {
     sfx.click();
@@ -436,6 +510,10 @@ async function copyReport(btn) {
     `Nave: ${ev.ship.capsule.name} + ${ev.ship.engine.name} · ${fmt(ev.wetMass)} kg · ${ev.lv.name} ×${state.launches}`,
     `Escalas: ${ev.route.steps.filter((s) => s.type === 'dock').map((s) => s.refill.station.short).join(', ') || 'ninguna'}`,
     `Resultado: ${r.grade} · ${r.score} puntos · costo US$ ${fmt(ev.cost)} M`,
+    `Radiación: ${fmt(r.dose)} mSv por persona · ${fmt(r.days)} días · datos recibidos ${Math.round(r.dataFraction * 100)} %`,
+    ...r.decisions.map((d) => `Decisión (día ${fmt(d.day)}) · ${d.title}: ${d.label}`),
+    ...(flightRun.challenge?.medal ? [`Reto «${flightRun.challenge.c.title}»: medalla de ${flightRun.challenge.medal}`] : []),
+    'Física: Tsiolkovsky, presupuesto de enlace DSN y dosis GCR · datos: NASA DONKI, NeoWs, EPIC',
   ].join('\n');
   try {
     await navigator.clipboard.writeText(text);
@@ -511,15 +589,18 @@ async function boot() {
   sceneFor(phase);
   enter();
   if (state.look.insignia.upload) preloadLogo(state.look.insignia.upload).then(() => { lastShipKey = ''; syncScene(); });
-  const [weather, neos, apod] = await Promise.all([loadSpaceWeather(), loadNeos(), loadApod()]);
+  const [weather, neos, apod, epic] = await Promise.all([loadSpaceWeather(), loadNeos(), loadApod(), loadEpic()]);
   Object.assign(nasa, {
     flares: weather.flares,
     cmes: weather.cmes,
+    seps: weather.seps,
+    gsts: weather.gsts,
     weatherLive: weather.live,
-    activity: solarActivity(weather.flares),
+    activity: solarActivity(weather.flares, weather.seps, weather.gsts),
     neos: neos.neos,
     neosLive: neos.live,
     apod,
+    epic,
   });
   ensureNeo();
   render();

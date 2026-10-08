@@ -1,9 +1,9 @@
 // Modelo de la misión tripulada: masa, ruta con estaciones y provisiones,
-// validaciones contra física y datos NASA, y simulación del vuelo.
+// validaciones contra física y datos NASA. El vuelo en sí vive en flight.js.
 import { PROGRAMS, DESTINATIONS, LAUNCHERS, STATIONS, INSTRUMENTS } from './data/catalog.js';
 import { PARTS, PROPELLANTS, PAINTS, ACCENTS } from './data/parts.js';
 import { ROLES, DEFAULT_NAMES } from './data/crew.js';
-import { neoRendezvous, G0 } from './physics.js';
+import { neoRendezvous, G0, AU_KM, downlinkBps, meanEarthDistanceAU } from './physics.js';
 
 export const DESIGN_MARGIN = 0.10; // contingencia de masa seca
 export const CREW_MASS = 100; // kg por persona con traje
@@ -34,7 +34,7 @@ export function defaultState() {
     ship: {
       capsule: 'orion', habitat: 'none', engine: 'aj10', tanks: 'm', power: 'xwing',
       life: 'open', shield: 'avcoat', docking: 'idss', legs: 'none', paint: 'white', accent: 'orange',
-      livery: 'bandas', finish: 'satinado', mli: 'oro', name: 'Esperanza',
+      livery: 'bandas', finish: 'satinado', mli: 'oro', name: 'Esperanza', comms: 'hgax',
     },
     instruments: ['cam', 'rad'],
     propLoad: 9000,
@@ -204,6 +204,7 @@ export function evaluate(state, nasa = {}) {
     'Soporte vital': ship.life.mass + (ship.life.id === 'open' ? 50 * crewN : 0),
     'Escudo térmico': ship.shield.mass,
     Acoplamiento: ship.docking.mass,
+    Comunicaciones: ship.comms.mass,
     'Tren de aterrizaje': ship.legs.mass,
     Ciencia: instruments.reduce((a, i) => a + i.mass, 0),
     Tripulación: crewN * CREW_MASS,
@@ -232,7 +233,7 @@ export function evaluate(state, nasa = {}) {
   // --- Energía (peor caso: punto más lejano del Sol) ---
   const gen = ship.power.solar ? ship.power.output / (dest.sunAU * dest.sunAU) : ship.power.output;
   const instrPower = instruments.reduce((a, i) => a + i.power, 0);
-  const powerNeed = AVIONICS_W + ship.life.power + instrPower;
+  const powerNeed = AVIONICS_W + ship.life.power + instrPower + ship.comms.power;
   const enginePower = ship.engine.power ? ship.engine.power + AVIONICS_W : 0;
   const genAt1AU = ship.power.output;
 
@@ -247,6 +248,9 @@ export function evaluate(state, nasa = {}) {
   const shieldFactor = 1 - Math.min(0.35, storage / 30000);
   const medic = state.crew.some((c) => c.role === 'medico') ? 0.8 : 1;
   const dose = steps.reduce((a, s) => a + (s.days ?? 0) * rates[s.region ?? 'deep'], 0) * shieldFactor * medic;
+
+  // --- Comunicaciones (TDRS en órbita baja; Red de Espacio Profundo más lejos) ---
+  const comms = linkBudget(state, dest, ship, instruments, steps, landing);
 
   // --- Aterrizaje ---
   const descent = route.steps.find((s) => s.land);
@@ -301,6 +305,10 @@ export function evaluate(state, nasa = {}) {
     landing ? check('landing', 'Alunizaje', ship.legs.id === 'none' ? 'fail' : twr >= 1.4 ? 'ok' : twr >= 1 ? 'warn' : 'fail',
       ship.legs.id === 'none' ? 'Falta el tren de aterrizaje' : `Empuje/peso lunar ${twr.toFixed(2)} (recomendado ≥ 1,4)`,
       'El motor debe vencer la gravedad lunar (1,62 m/s²) con margen para frenar y maniobrar. El módulo lunar del Apolo empezaba el descenso con ~1,8.') : null,
+    check('comms', 'Comunicaciones', !comms.voiceOk ? 'fail' : comms.fraction >= 0.95 ? 'ok' : comms.fraction >= 0.5 ? 'warn' : 'fail',
+      !comms.voiceOk ? `Solo ${fmtRate(comms.rate)} a ${fmtKm(comms.distKm)}: la tripulación queda incomunicada`
+        : `${fmtRate(comms.rate)} vía ${comms.network} a ${fmtKm(comms.distKm)} · llegan ${fmtGb(comms.down)} de ${fmtGb(comms.generated)} de ciencia`,
+      'La señal se debilita con la distancia al cuadrado. Las antenas de 34 y 70 m de la Red de Espacio Profundo de la NASA (California, España y Australia) reciben a las naves lejanas; en órbita baja se usan los satélites TDRS. El láser (DSOC) envía mucho más, pero las nubes lo bloquean.'),
     check('science', 'Carga científica', instruments.length <= sciSlots ? 'ok' : 'fail',
       `${instruments.length} de ${sciSlots} espacios`,
       'Los hábitats agregan espacio para experimentos; la cápsula sola tiene muy poco.'),
@@ -316,145 +324,49 @@ export function evaluate(state, nasa = {}) {
     state, dest, program, lv, ship, instruments, crewN, propType, pd, landing, sciSlots,
     parts, dryMass, dryNoMargin, wetMass, capacity, direct, crewLaunch, needsDock,
     storage, cons0, prop0, tankCapacity, steps, route, routeDays, totalDv,
-    gen, powerNeed, enginePower, volume, volNeed, volPer, dose, twr,
+    gen, powerNeed, enginePower, volume, volNeed, volPer, dose, twr, comms,
     costs, cost, activity, checks,
     canLaunch: !checks.some((c) => ['launch', 'crew'].includes(c.id) && c.status === 'fail'),
   };
 }
 
-function check(id, label, status, detail, why) {
-  return { id, label, status, detail, why };
+/** ¿Puede este instrumento trabajar en esta misión? */
+export function usable(ins, ev) {
+  if (ins.needsLanding) return ev.landing;
+  // muestras: en la superficie, o en un asteroide con brazo robótico (como TAGSAM de OSIRIS-REx)
+  if (ins.needsSurface) return ev.landing || (ev.dest.id === 'neo' && ev.ship.docking.repairs);
+  return true;
 }
 
-/** Simulación determinista (semilla = diseño) con eventos reales de clima espacial. */
-export function simulate(state, ev, flares = []) {
-  const rng = mulberry32(hash(JSON.stringify(state)));
-  const log = [];
-  const roles = new Set(state.crew.map((c) => c.role));
-  const reliabilityBonus = roles.has('comandante') ? 0.02 : 0;
-  const engineFail = (1 - ev.ship.engine.reliability) * (roles.has('ingeniero') ? 0.6 : 1);
-  const canRepair = ev.ship.docking.repairs || roles.has('ingeniero');
-  let departed = false;
-  let reached = false;
-  let landed = false;
-
-  const flareEvents = flares.filter((f) => /^[XM]/i.test(f.classType || '')).slice(0, 3);
-  let flareIdx = 0;
-
-  // Cada etapa devuelve el desenlace si la misión termina ahí (o null para seguir).
-  const runStep = (s) => {
-    const day = `Día ${fmt(s.day)}`;
-    if (s.type === 'launch') {
-      const launches = state.launches + (ev.crewLaunch ? 1 : 0);
-      for (let i = 0; i < launches; i++) {
-        if (rng() > ev.lv.reliability + reliabilityBonus) {
-          log.push({ t: 'T-0', kind: 'fail', scene: 'launch', text: `Falla del ${i === launches - 1 && ev.crewLaunch ? 'Falcon 9 de la tripulación' : ev.lv.name}. El sistema de escape salva a la tripulación, pero la misión se cancela.` });
-          return 'abort';
-        }
-      }
-      log.push({ t: 'T-0', kind: 'ok', scene: 'launch', text: `${s.name}: ${state.launches > 1 ? `${state.launches} lanzamientos y ensamblaje en órbita. ` : ''}${fmt(ev.wetMass)} kg en camino.${ev.crewLaunch ? ' La tripulación llega aparte en Falcon 9 y se acopla.' : ''}` });
-      return null;
-    }
-    if (s.type === 'dock') {
-      const r = s.refill;
-      const what = [];
-      if (r.prop > 0) what.push(`${fmt(r.prop)} kg de ${PROPELLANTS[ev.propType].name.toLowerCase()}`);
-      if (r.cons > 0) what.push(`${fmt(r.cons)} kg de víveres, agua y O₂`);
-      log.push({
-        t: day, kind: 'ok', scene: 'dock', station: s.station,
-        text: `${s.name}. ${state.crew[0].name} cruza la escotilla y carga ${what.length ? what.join(' y ') : 'nada: no hay stock compatible'}${r.cost ? ` (US$ ${fmt(r.cost)} M)` : ''}.${r.incompatible && ev.propType ? ` La estación no tiene ${PROPELLANTS[ev.propType].name.toLowerCase()}.` : ''}`,
-      });
-      return null;
-    }
-    if (s.type === 'burn') {
-      if (ev.route.failure?.reason === 'prop' && ev.route.failure.step.name === s.name) {
-        const short = fmt(ev.route.failure.short);
-        if (!departed) {
-          log.push({ t: day, kind: 'fail', scene: 'burn', text: `${s.name}: el propelente no alcanza (faltan ${short} kg). Se aborta en órbita baja y la tripulación vuelve a casa.` });
-          return 'abort';
-        }
-        if (!reached && ev.dest.id === 'moon') {
-          log.push({ t: day, kind: 'fail', scene: 'burn', text: `${s.name}: sin propelente para frenar (faltan ${short} kg). Como el Apolo 13, la trayectoria de retorno libre rodea la Luna y trae a la tripulación de vuelta.` });
-          return 'freereturn';
-        }
-        log.push({ t: day, kind: 'fail', scene: 'burn', text: `${s.name}: el propelente se agota (faltan ${short} kg). La nave queda varada lejos de la Tierra.` });
-        return 'stranded';
-      }
-      if (s.dv > 0.3 && rng() < engineFail) {
-        if (canRepair) {
-          log.push({ t: day, kind: 'warn', scene: 'burn', text: `${s.name}: el motor se apaga antes de tiempo. ${roles.has('ingeniero') ? 'Ingeniería de vuelo' : 'El brazo robótico'} permite repararlo y repetir el encendido.` });
-        } else {
-          log.push({ t: day, kind: 'fail', scene: 'burn', text: `${s.name}: falla del motor sin forma de repararlo.` });
-          return departed ? 'stranded' : 'abort';
-        }
-      } else {
-        log.push({
-          t: day, kind: 'info', scene: s.land ? 'land' : 'burn',
-          text: s.dv > 0 ? `${s.name}: ${s.dv.toFixed(2)} km/s, se usan ${fmt(s.need)} kg de propelente.` : `${s.name}: la etapa superior del cohete hace el encendido.`,
-        });
-      }
-      if (s.land) landed = true;
-      if (s.dv > 0 || s.days > 1) departed = true;
-      if (/Inserción|Encuentro/.test(s.name)) reached = true;
-      // tormentas solares reales durante los tramos largos
-      if (s.days > 2 && flareIdx < flareEvents.length) {
-        const f = flareEvents[flareIdx++];
-        const date = (f.peakTime || f.beginTime || '').slice(0, 10);
-        log.push({ t: `Días ${fmt(s.day - s.days)}–${fmt(s.day)}`, kind: 'warn', source: 'DONKI', scene: 'burn', text: `Fulguración ${f.classType} (como la registrada por la NASA el ${date}): la tripulación se refugia junto a los tanques de agua durante la tormenta de partículas.` });
-      }
-      return null;
-    }
-    if (s.type === 'stay') {
-      reached = true;
-      if (ev.route.failure?.reason === 'cons' && ev.route.failure.step.name === s.name) {
-        log.push({ t: day, kind: 'fail', scene: 'stay', text: `${s.name}: se acaban los víveres. Regreso de emergencia.` });
-        return 'cons';
-      }
-      log.push({ t: day, kind: 'ok', scene: s.region === 'surface' ? 'land' : 'stay', text: `${s.name} durante ${fmt(s.days)} días.` });
-      return null;
-    }
-    if (s.type === 'reentry') {
-      if (ev.route.failure?.reason === 'cons') {
-        log.push({ t: day, kind: 'fail', scene: 'reentry', text: 'Los víveres se agotaron antes de volver. La tripulación no sobrevive.' });
-        return 'cons';
-      }
-      if (ev.ship.shield.maxEntry < s.speed) {
-        log.push({ t: day, kind: 'fail', scene: 'reentry', text: `Reentrada a ${s.speed.toFixed(1)} km/s: el escudo (${ev.ship.shield.maxEntry || 0} km/s) no resiste.` });
-        return 'reentry';
-      }
-      log.push({ t: day, kind: 'ok', scene: 'reentry', text: `Reentrada a ${s.speed.toFixed(1)} km/s y amerizaje. ¡Bienvenidos a casa!` });
-    }
-    return null;
+/** Presupuesto de enlace: tasa de bajada, datos generados y datos que llegan a la Tierra. */
+function linkBudget(state, dest, ship, instruments, steps, landing) {
+  const link = dest.link;
+  const distKm = link.distKm ?? meanEarthDistanceAU(dest.orbit) * AU_KM;
+  const rate = downlinkBps(ship.comms, distKm, link.ground) * (ship.comms.availability ?? 1);
+  const stayDays = steps.filter((s) => s.type === 'stay').reduce((a, s) => a + s.days, 0);
+  const lastBurn = [...steps].reverse().find((s) => s.type === 'burn');
+  const backhaulDays = stayDays + (lastBurn?.days ?? 0); // se sigue transmitiendo en el regreso
+  const ev = { landing, dest, ship };
+  const dataInstr = instruments.filter((i) => i.kind === 'datos' && usable(i, ev));
+  const generated = dataInstr.reduce((a, i) => a + i.data, 0) * stayDays;
+  const perDay = (rate * link.contactH * 3600) / 1e9;
+  const down = Math.min(generated, perDay * backhaulDays);
+  return {
+    network: link.network === 'TDRS' ? 'satélites TDRS' : 'Red de Espacio Profundo',
+    distKm, rate, perDay, generated, down,
+    capacity: perDay * backhaulDays, // lo que el enlace puede bajar en toda la misión
+    fraction: generated > 0 ? down / generated : 1,
+    voiceOk: rate >= 64e3, // voz, telemetría y video básico
   };
+}
 
-  for (const s of ev.route.steps) {
-    const from = log.length;
-    const outcome = runStep(s);
-    // telemetría para la interfaz: día, propelente y víveres tras la etapa
-    for (let i = from; i < log.length; i++) log[i].tele ??= { day: s.day, prop: s.after.prop, cons: s.after.cons };
-    if (outcome) return finish(outcome);
-  }
-  return finish('ok');
+const fmtRate = (bps) => (bps >= 1e6 ? `${(bps / 1e6).toFixed(bps >= 1e7 ? 0 : 1)} Mbps` : bps >= 1e3 ? `${(bps / 1e3).toFixed(0)} kbps` : `${bps.toFixed(0)} bps`);
+const fmtKm = (km) => (km >= 1e7 ? `${(km / AU_KM).toFixed(2)} UA` : `${fmt(km)} km`);
+export const fmtGb = (gb) => (gb >= 1000 ? `${(gb / 1000).toFixed(1)} Tb` : gb >= 1 ? `${gb.toFixed(gb >= 100 ? 0 : 1)} Gb` : `${(gb * 1000).toFixed(0)} Mb`);
+export { fmtRate, fmtKm };
 
-  function finish(outcome) {
-    const lostCrew = ['stranded', 'reentry', 'cons'].includes(outcome);
-    let science = 0;
-    if (reached) {
-      for (const ins of ev.instruments) {
-        if (ins.needsLanding && !landed) continue;
-        science += ins.value[ev.dest.sci];
-      }
-      if (roles.has('cientifico')) science *= 1.25;
-    }
-    const explore = reached ? ev.dest.explore + (landed ? 45 : 0) : 0;
-    const overrun = Math.max(0, ev.cost / ev.program.budget - 1);
-    const healthy = ev.dose <= CAREER_DOSE ? 1 : 0.6;
-    let score = lostCrew ? 0 : Math.round((science * 8 + explore) * healthy * Math.max(0, 1 - overrun * 2) * (outcome === 'ok' ? 1 : 0.4));
-    const grade = lostCrew ? 'F' : score >= 260 ? 'S' : score >= 180 ? 'A' : score >= 110 ? 'B' : score >= 50 ? 'C' : 'D';
-    if (overrun > 0 && !lostCrew) log.push({ t: 'Revisión', kind: 'warn', text: `Sobrecosto de ${(overrun * 100).toFixed(0)} %: el Congreso recorta la puntuación.` });
-    if (ev.dose > CAREER_DOSE && !lostCrew) log.push({ t: 'Revisión', kind: 'warn', text: `La tripulación superó el límite de radiación (${fmt(ev.dose)} mSv).` });
-    return { ok: outcome === 'ok', outcome, lostCrew, log, science, explore, score, grade, landed, reached };
-  }
+function check(id, label, status, detail, why) {
+  return { id, label, status, detail, why };
 }
 
 /** Propelente mínimo al despegar para completar la ruta con 5 % de reserva (búsqueda binaria). */
@@ -499,17 +411,3 @@ export const paintHex = (id) => (/^#[0-9a-f]{6}$/i.test(id) ? id : (PAINTS.find(
 export const accentHex = (id) => (/^#[0-9a-f]{6}$/i.test(id) ? id : (ACCENTS.find((p) => p.id === id) ?? ACCENTS[0]).hex);
 
 export const fmt = (n) => Math.round(n).toLocaleString('es');
-
-function hash(str) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
-  return h >>> 0;
-}
-function mulberry32(a) {
-  return () => {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}

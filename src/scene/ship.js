@@ -267,7 +267,10 @@ export function buildShip(ev, look = {}) {
   mark('life');
   addPower(g, ship.power, R, smY, dark, metal);
   mark('power');
+  addComms(g, ship.comms, ship.power.id, R, smY, smH, metal, dark);
+  mark('comms');
   focus.power = { y: smY, r: Math.max(8, R * 5) };
+  focus.comms = { y: smY, r: Math.max(7, R * 3.5) };
   focus.life = { y: smY, r: R * 3.2 };
   y += smH;
 
@@ -582,4 +585,60 @@ function addPower(g, power, R, y, dark, metal) {
       g.add(core, rad);
     }
   }
+}
+
+/** Antena en un mástil que sale del módulo de servicio, donde no estorban los paneles. */
+function addComms(g, comms, powerId, R, y, h, metal, dark) {
+  const dir = powerId === 'xwing' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
+  const white = new THREE.MeshStandardMaterial({ color: 0xeeece6, roughness: 0.5, metalness: 0.1, side: THREE.DoubleSide });
+  if (comms.id === 'sband') {
+    // dos antenas pequeñas en lados opuestos
+    for (const k of [1, -1]) {
+      const stub = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.7, 8), metal);
+      stub.position.copy(dir).multiplyScalar(k * (R + 0.05)).setY(y + h * 0.45);
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), white);
+      cap.position.copy(stub.position).setY(stub.position.y + 0.38);
+      g.add(stub, cap);
+    }
+    return;
+  }
+  const boomLen = comms.id === 'hgaka' ? 2.6 : 1.8;
+  const base = dir.clone().multiplyScalar(R);
+  base.y = y - h * 0.1;
+  const tip = base.clone().addScaledVector(dir, boomLen);
+  tip.y += boomLen * 0.35;
+  const len = base.distanceTo(tip);
+  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, len, 10), metal);
+  boom.position.copy(base).add(tip).multiplyScalar(0.5);
+  boom.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tip.clone().sub(base).normalize());
+  g.add(boom);
+  const joint = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10), dark);
+  joint.position.copy(tip);
+  g.add(joint);
+  if (comms.laser) {
+    // telescopio óptico sobre un cardán
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.75, 24), white);
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.19, 24), new THREE.MeshStandardMaterial({ color: 0x1b2a55, metalness: 1, roughness: 0.05 }));
+    tube.rotation.x = -0.6;
+    lens.position.y = 0.38;
+    lens.rotation.x = -Math.PI / 2;
+    tube.add(lens);
+    tube.position.copy(tip).add(new THREE.Vector3(0, 0.35, 0));
+    g.add(tube);
+    return;
+  }
+  // plato parabólico (paraboloide), mirando hacia afuera y hacia arriba como apuntando a la Tierra
+  const r = comms.dish / 2;
+  const pts = [];
+  for (let i = 0; i <= 16; i++) {
+    const x = (i / 16) * r;
+    pts.push(new THREE.Vector2(x, (x * x) / (r * 1.6)));
+  }
+  const dish = new THREE.Mesh(new THREE.LatheGeometry(pts, 48), white);
+  const feed = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, r * 0.75, 8), metal);
+  feed.position.y = r * 0.37;
+  dish.add(feed);
+  dish.position.copy(tip).add(new THREE.Vector3(0, 0.12, 0));
+  dish.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().add(new THREE.Vector3(0, 0.9, 0)).normalize());
+  g.add(dish);
 }

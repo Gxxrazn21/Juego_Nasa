@@ -9,6 +9,11 @@ const RESOURCES = {
   flares: { path: '/DONKI/FLR', params: ['startDate', 'endDate'] },
   cmes: { path: '/DONKI/CME', params: ['startDate', 'endDate'] },
   apod: { path: '/planetary/apod', params: ['date', 'thumbs'] },
+  // Partículas solares energéticas y tormentas geomagnéticas (DONKI)
+  sep: { path: '/DONKI/SEP', params: ['startDate', 'endDate'] },
+  gst: { path: '/DONKI/GST', params: ['startDate', 'endDate'] },
+  // La Tierra vista hoy por la cámara EPIC del satélite DSCOVR
+  epic: { path: '/EPIC/api/natural', params: [] },
 };
 
 const SAFE_VALUE = /^[0-9A-Za-z-]{1,20}$/;

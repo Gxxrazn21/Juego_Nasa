@@ -74,3 +74,39 @@ export function orbitPoint({ a, e, i, node = 0, peri = 0 }, nu) {
   const z = r * Math.sin(u) * Math.sin(inc);
   return { x, y, z };
 }
+
+// ---------- Comunicaciones ----------
+// Radio: tasa ∝ P · D² / (λ² · d²). Calibrado con Mars Reconnaissance Orbiter: antena de 3 m,
+// 100 W en banda X, ~6 Mbps a 0,7 UA hacia una antena de 34 m de la Red de Espacio Profundo.
+const RF_K = 7.35e19;
+// Factor por banda respecto a la X: S tiene λ 3,6 veces mayor (∝ 1/λ²); Ka en la práctica rinde ~4×.
+export const BANDS = { S: 0.077, X: 1, Ka: 4 };
+export const RF_MAX_BPS = 150e6; // límite práctico en banda Ka
+// Láser: calibrado con DSOC (nave Psyche, 2023): 4 W y 267 Mbps a ~0,2 UA.
+const LASER_K = 7.3e22;
+export const LASER_MAX_BPS = 260e6; // O2O de Artemis II
+
+/**
+ * Tasa de bajada en bit/s.
+ * @param {object} c  terminal: { tx (W), dish (m), band ('S'|'X'|'Ka'), laser? }
+ * @param {number} distKm distancia a la estación terrena
+ * @param {number} ground factor de la antena terrena (1 = DSN 34 m; TDRS ≈ 0,02)
+ */
+export function downlinkBps(c, distKm, ground = 1) {
+  if (c.laser) return Math.min(LASER_MAX_BPS, (LASER_K * c.tx) / (distKm * distKm));
+  const band = BANDS[c.band] ?? 1;
+  return Math.min(RF_MAX_BPS, (RF_K * band * c.tx * c.dish * c.dish * ground) / (distKm * distKm));
+}
+
+/** Distancia media Tierra–órbita objetivo (UA), promediando todas las posiciones relativas. */
+export function meanEarthDistanceAU(orbit, n = 48) {
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const p = orbitPoint(orbit, (i / n) * Math.PI * 2);
+    for (let j = 0; j < n; j++) {
+      const t = (j / n) * Math.PI * 2;
+      sum += Math.hypot(p.x - Math.cos(t), p.y - Math.sin(t), p.z);
+    }
+  }
+  return sum / (n * n);
+}

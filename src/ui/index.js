@@ -6,3 +6,4 @@ export { hangar, insigniaPreview } from './hangar.js';
 export { route } from './route.js';
 export { review } from './review.js';
 export { flight } from './flight.js';
+export { challenges, challengeBox } from './challenges.js';

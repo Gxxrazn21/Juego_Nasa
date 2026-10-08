@@ -1,5 +1,6 @@
 // Navegación de fases, indicadores de datos NASA y presupuestos.
 import { money, kg, fmt } from './common.js';
+import { fmtGb } from '../mission.js';
 
 export const PHASES = [
   { id: 'mission', name: 'Misión' },
@@ -45,6 +46,7 @@ export function budgets(ev) {
     meter('Propelente', kg(propUsed), propUsed, propAvail, status('route'), `disponible ${kg(propAvail)}`),
     meter('Víveres', kg(consUsed), consUsed, consAvail, status('cons'), `a bordo + estaciones ${kg(consAvail)}`),
     meter('Energía', `${fmt(ev.powerNeed)} W`, ev.powerNeed, ev.gen, status('power'), `genera ${fmt(ev.gen)} W`),
+    meter('Datos', fmtGb(ev.comms.generated), ev.comms.generated, ev.comms.capacity, status('comms'), `el enlace baja ${fmtGb(ev.comms.capacity)}`),
     meter('Costo', money(ev.cost), ev.cost, ev.program.budget, status('budget'), `techo ${money(ev.program.budget)}`),
   ].join('');
 }

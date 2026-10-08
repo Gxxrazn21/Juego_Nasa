@@ -1,5 +1,6 @@
 // Fase 05: revisión de diseño.
 import { money, kg, fmt } from './common.js';
+import { challengeBox } from './challenges.js';
 
 // ---------- 05 Revisión ----------
 const PART_COLORS = ['oklch(0.35 0.03 265)', 'oklch(0.66 0.19 42)', 'oklch(0.55 0.1 250)', 'oklch(0.45 0.05 150)', 'oklch(0.72 0.12 85)', 'oklch(0.5 0.12 20)', 'oklch(0.62 0.02 265)', 'oklch(0.8 0.05 60)', 'oklch(0.4 0.08 300)', 'oklch(0.6 0.1 200)', 'oklch(0.7 0.05 120)'];
@@ -31,6 +32,7 @@ export function review(state, ev) {
   ${stack(ev.parts)}
   <h3>Costo <small class="num">${money(ev.cost)}</small></h3>
   ${stack(ev.costs)}
+  ${challengeBox(state, ev)}
   <div class="actions">
     <button class="btn btn--go" data-launch ${ev.canLaunch ? '' : 'disabled'}>${ev.canLaunch ? '¡Lanzar!' : 'No se puede lanzar así'}</button>
     <button class="btn" data-go="hangar">Volver al hangar</button>

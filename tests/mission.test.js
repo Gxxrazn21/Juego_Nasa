@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultState, evaluate, simulate, paintHex, accentHex } from '../src/mission.js';
+import { defaultState, evaluate, paintHex, accentHex } from '../src/mission.js';
+import { simulate } from '../src/flight.js';
 import { FALLBACK_NEOS } from '../src/data/catalog.js';
 import { FALLBACK_FLARES } from '../src/data/fallback.js';
 
@@ -16,7 +17,7 @@ test('La misión lunar por defecto (Orion + SLS + Gateway) vuelve a casa', () =>
   const ev = evaluate(s, nasa);
   assert.equal(ev.canLaunch, true);
   assert.equal(ev.route.failure, null);
-  const r = simulate(s, ev, FALLBACK_FLARES);
+  const r = simulate(s, ev, { flares: FALLBACK_FLARES });
   assert.equal(r.lostCrew, false);
   assert.ok(r.score > 0);
 });
@@ -62,7 +63,7 @@ test('Todos los destinos evalúan y simulan sin NaN', () => {
     const s = variant({ destination, neoId: '2101955' });
     const ev = evaluate(s, nasa);
     for (const c of ev.checks) assert.ok(!/NaN|undefined/.test(c.detail), `${destination}: ${c.detail}`);
-    const r = simulate(s, ev, FALLBACK_FLARES);
+    const r = simulate(s, ev, { flares: FALLBACK_FLARES });
     assert.ok(Number.isFinite(r.score), destination);
     for (const l of r.log) assert.ok(!/NaN|undefined/.test(l.text), `${destination}: ${l.text}`);
   }
@@ -70,7 +71,7 @@ test('Todos los destinos evalúan y simulan sin NaN', () => {
 
 test('Cada entrada de la bitácora trae telemetría (día, propelente, víveres)', () => {
   const s = defaultState();
-  const r = simulate(s, evaluate(s, nasa), FALLBACK_FLARES);
+  const r = simulate(s, evaluate(s, nasa), { flares: FALLBACK_FLARES });
   for (const l of r.log.filter((x) => x.t !== 'Revisión')) {
     assert.ok(l.tele && Number.isFinite(l.tele.day) && Number.isFinite(l.tele.prop) && Number.isFinite(l.tele.cons), l.text);
   }
@@ -93,8 +94,21 @@ test('Todas las naves de fábrica completan su misión sin fallas', async () => 
     const ev = evaluate(s, hard);
     const fails = ev.checks.filter((c) => c.status === 'fail').map((c) => `${c.label}: ${c.detail}`);
     assert.deepEqual(fails, [], p.id);
-    const r = simulate(s, ev, FALLBACK_FLARES);
+    const r = simulate(s, ev, { flares: FALLBACK_FLARES });
     assert.equal(r.lostCrew, false, p.id);
     assert.ok(r.reached, `${p.id} llega a su destino`);
   }
+});
+
+test('Con antenas omnidireccionales en banda S, desde Marte la tripulación queda incomunicada', () => {
+  const ev = evaluate(variant({ destination: 'mars', program: 'horizonte', ship: { comms: 'sband' } }), nasa);
+  assert.equal(status(ev, 'comms'), 'fail');
+  assert.equal(ev.comms.voiceOk, false);
+  assert.equal(ev.comms.network, 'Red de Espacio Profundo');
+});
+
+test('Una antena más grande o el láser bajan más ciencia desde Marte', () => {
+  const rate = (comms) => evaluate(variant({ destination: 'mars', program: 'horizonte', ship: { comms } }), nasa).comms.rate;
+  assert.ok(rate('hgaka') > rate('hgax') * 10, 'banda Ka de 3 m ≫ banda X de 1,5 m');
+  assert.ok(rate('laser') > rate('hgax'), 'el láser supera a la banda X aun con nubes');
 });

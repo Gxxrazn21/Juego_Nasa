@@ -4,6 +4,8 @@ import { PARTS, SLOTS, PROPELLANTS, PAINTS, ACCENTS, LIVERIES, FINISH_LIST, MLI_
 import { SHAPES, SYMBOLS, INSIGNIA_BG, drawInsignia } from '../app/insignia.js';
 import { PRESETS } from '../data/presets.js';
 import { esc, money, kg, fmt, radio, swatches, chips } from './common.js';
+import { downlinkBps } from '../physics.js';
+import { fmtRate, fmtKm, fmtGb, usable } from '../mission.js';
 
 /** Vista previa de la insignia como imagen (mismo dibujo que se pinta en la nave). */
 export function insigniaPreview(opts, size = 192) {
@@ -25,6 +27,10 @@ function partStats(slot, p, ev) {
     case 'power': return `${fmt(p.output / 1000)} kW ${p.solar ? 'a 1 UA (cae con 1/d²)' : 'constantes'}`;
     case 'life': return `${p.rate} kg/persona/día · consume ${fmt(p.power / 1000)} kW`;
     case 'shield': return p.maxEntry ? `Hasta ${p.maxEntry} km/s` : 'Sin regreso posible';
+    case 'comms': {
+      const rate = downlinkBps(p, ev.comms.distKm, ev.dest.link.ground) * (p.availability ?? 1);
+      return `${p.laser ? 'Láser' : `Banda ${p.band}`} · ${fmtRate(rate)} desde ${esc(ev.dest.short)} (${fmtKm(ev.comms.distKm)}) · consume ${p.power} W`;
+    }
     default: return '';
   }
 }
@@ -93,7 +99,7 @@ export function hangar(state, ev, slot, insignia, extra = {}) {
         <input type="checkbox" name="instrument" value="${ins.id}" ${on ? 'checked' : ''} ${full ? 'disabled' : ''} />
         <span class="option__name">${ins.name}${ins.needsLanding ? '<span class="tag">superficie</span>' : ''}</span>
         <span class="option__aside value-dots" title="Valor en ${esc(ev.dest.short)}: ${v}/10">${'●'.repeat(Math.round(v / 2))}${'○'.repeat(5 - Math.round(v / 2))}</span>
-        <span class="option__meta num">${kg(ins.mass)} · ${fmt(ins.power)} W · ${money(ins.cost)}</span>
+        <span class="option__meta num">${kg(ins.mass)} · ${fmt(ins.power)} W · ${money(ins.cost)} · ${ins.kind === 'datos' ? `${fmtGb(ins.data)}/día por radio` : 'muestras que vuelven contigo'}${usable(ins, ev) ? '' : ' · <strong>no sirve en esta misión</strong>'}</span>
       </label>`;
     }).join('')}</div>`;
   } else {

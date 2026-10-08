@@ -2,9 +2,10 @@
 import { PROGRAMS, DESTINATIONS } from '../data/catalog.js';
 import { neoRendezvous } from '../physics.js';
 import { esc, money, radio, fmt } from './common.js';
+import { challenges } from './challenges.js';
 
 // ---------- 01 Misión ----------
-export function mission(state, ev, nasa) {
+export function mission(state, ev, nasa, medals = {}) {
   const a = nasa.activity;
   const flares = [...(nasa.flares || [])]
     .filter((f) => /^[XM]/i.test(f.classType || ''))
@@ -19,6 +20,8 @@ export function mission(state, ev, nasa) {
     <p><strong>¿Primera vez?</strong> Empieza con una nave de fábrica ya probada: Artemis, Dragon, un alunizador nuclear o el tránsito a Marte.</p>
     <button type="button" class="btn btn--small" data-go="hangar" data-open="presets">Ver naves →</button>
   </aside>
+
+  ${challenges(state, ev, medals, nasa)}
 
   <h3>Destino</h3>
   <div class="options">
@@ -38,11 +41,17 @@ export function mission(state, ev, nasa) {
       <dt>Actividad</dt><dd>${esc(a.label)} (índice ${a.index.toFixed(2)})</dd>
       <dt>Fulguraciones</dt><dd>${a.total} registradas · ${a.x} clase X · ${a.m} clase M</dd>
       <dt>CME</dt><dd>${(nasa.cmes || []).length} eyecciones de masa coronal</dd>
+      <dt>Partículas</dt><dd>${a.sep} eventos de partículas solares (SEP)${nasa.weatherLive ? '' : ' · sin datos de respaldo'}</dd>
+      <dt>Tormentas</dt><dd>${a.kpMax ? `Kp máximo ${a.kpMax} (escala geomagnética 0–9)` : 'Sin tormentas geomagnéticas registradas'}</dd>
     </dl>
     ${flares.length ? `<ul class="flare-list">${flares.map((f) => `<li><span class="flare-class" ${/^X/i.test(f.classType) ? 'data-x' : ''}>${esc(f.classType)}</span><span class="num">${esc((f.peakTime || f.beginTime || '').slice(0, 10))}</span><span>${esc(f.sourceLocation || '')}</span></li>`).join('')}</ul>` : '<p class="hint">Sol tranquilo: sin fulguraciones M o X en el periodo.</p>'}
-    <p class="hint">Este índice sube la dosis de radiación de la tripulación fuera de la magnetosfera.</p>`
+    <p class="hint">Este índice sube la dosis de radiación fuera de la magnetosfera y decide las tormentas solares que tu tripulación enfrentará en el vuelo.</p>`
     : '<p class="hint">Consultando a la NASA…</p>'}
 
+  ${nasa.epic ? `<div class="apod">
+    <img src="${esc(nasa.epic.url)}" alt="La Tierra completa vista por la cámara EPIC" loading="lazy" />
+    <div><strong>La Tierra hoy</strong>Foto real de la cámara EPIC del satélite DSCOVR, a 1,5 millones de km · ${esc(nasa.epic.date)}</div>
+  </div>` : ''}
   ${nasa.apod && nasa.apod.media_type === 'image' ? `<div class="apod">
     <img src="${esc(nasa.apod.url)}" alt="${esc(nasa.apod.title)}" loading="lazy" />
     <div><strong>${esc(nasa.apod.title)}</strong>Imagen astronómica del día (APOD) · ${esc(nasa.apod.date)}</div>
@@ -71,7 +80,7 @@ function neoPicker(state, nasa) {
   <div class="options">
     ${sortNeos(neos).slice(0, 8).map(({ n, t }) => radio('neoId', n.id, state.neoId === n.id,
       `${esc(n.name)}${n.hazardous ? '<span class="tag tag--alert">PHA</span>' : ''}`,
-      `a ${n.a.toFixed(3)} UA · e ${n.e.toFixed(3)} · i ${n.i.toFixed(1)}°${n.diameterM ? ` · ~${fmt(n.diameterM)} m` : ''} · viaje ${fmt(t.transferDays)} días`,
+      `a ${n.a.toFixed(3)} UA · e ${n.e.toFixed(3)} · i ${n.i.toFixed(1)}°${n.diameterM ? ` · ~${fmt(n.diameterM)} m` : ''} · viaje ${fmt(t.transferDays)} días${n.approach ? `<br>Próximo paso cerca de la Tierra: <strong>${esc(n.approach.date)}</strong> a ${n.approach.km < 1e6 ? `${fmt(n.approach.km)} km` : `${n.approach.au.toFixed(3)} UA`} (${n.approach.kms.toFixed(1)} km/s)` : ''}`,
       `Δv ${(t.departureFromLeo + t.arrivalDv * 2).toFixed(1)} km/s`)).join('')}
   </div>
   <p class="hint">El Δv (salida + encuentro + regreso) se calcula con los elementos orbitales reales del asteroide. PHA = potencialmente peligroso.</p>`;
